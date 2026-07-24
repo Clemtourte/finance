@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Données locales (cache Parquet, entrepôt DuckDB)
+data/cache/
+data/*.duckdb
+data/*.duckdb.wal
+
+# Tests / outils
+.pytest_cache/
+.ruff_cache/
+
