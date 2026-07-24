@@ -2,7 +2,7 @@
 #
 # Les coûts de transaction ne sont jamais optionnels : ils sont toujours
 # lus depuis ce fichier et appliqués à l'entrée ET à la sortie de chaque
-# position (voir src/engine/backtest.py).
+# position (voir src/engine/backtest.py, src/engine/costs.py).
 
 initial_capital: 10000.0
 
@@ -15,8 +15,24 @@ trading_days_per_year: 252
 risk_free_rate: 0.0
 
 costs:
-  # Courtage Boursobank, par transaction (à l'achat comme à la vente).
-  brokerage_fee_pct: 0.006
-  # Glissement estimé entre le prix de clôture qui déclenche le signal et
-  # le prix d'exécution réel à l'ouverture suivante.
-  slippage_pct: 0.0005
+  # Grille de courtage BoursoBank (ordre "Découverte", Euronext), par
+  # paliers sur la valeur de l'ordre. À VÉRIFIER / AJUSTER selon la
+  # grille tarifaire réellement en vigueur au moment du backtest : ces
+  # valeurs sont un point de départ raisonnable, pas une vérité figée.
+  # Le dernier palier doit avoir max_order_value: null (aucune limite).
+  brokerage_tiers:
+    - max_order_value: 500.0
+      fixed_fee: 1.99
+    - max_order_value: null
+      pct_fee: 0.006
+
+  # Taxe sur les transactions financières (France), 0,4%, appliquée à
+  # l'ACHAT uniquement, et seulement pour les titres marqués `ttf: true`
+  # dans le fichier d'univers (grandes capitalisations françaises).
+  ttf_pct: 0.004
+
+  # Glissement générique entre le prix de clôture qui déclenche le signal
+  # et le prix d'exécution réel à l'ouverture suivante. S'ajoute au spread
+  # propre à chaque titre (champ `spread_pct` de l'univers), qui n'est pas
+  # défini ici car il varie par titre.
+  base_slippage_pct: 0.0005

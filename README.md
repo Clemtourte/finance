@@ -51,6 +51,27 @@ Comment c'est appliqué concrètement :
 
 Voir aussi la docstring de `src/data/schema.py`.
 
+## Modèle de coûts
+
+`src/engine/costs.py` modélise trois composantes cumulables, appliquées à
+l'entrée ET à la sortie de chaque position (sauf mention contraire) :
+
+- **Courtage par paliers** (`config/backtest.yaml`, grille BoursoBank
+  "Découverte" par défaut : 1,99€ jusqu'à 500€, 0,60% au-delà — **à
+  vérifier/ajuster** selon la grille tarifaire réellement en vigueur).
+- **TTF** (taxe sur les transactions financières), 0,4% à l'**achat
+  uniquement**, seulement si le titre est marqué `ttf: true` dans son
+  fichier d'univers (grandes capitalisations françaises).
+- **Spread par titre** (champ `spread_pct` de l'univers), modélisé comme
+  un glissement additionnel symétrique, cumulé au glissement générique
+  d'exécution (`base_slippage_pct`).
+
+Comme le courtage dépend du montant de chaque ordre (pas un taux plat),
+`build_order_cost_arrays` simule séquentiellement les allers-retours
+pour déterminer, ordre par ordre, le palier applicable et le capital
+réellement disponible, puis fournit à `vectorbt` des tableaux `fees` /
+`fixed_fees` / `slippage` par barre plutôt qu'un scalaire unique.
+
 ## Installation
 
 Prérequis : [uv](https://docs.astral.sh/uv/). `uv sync` télécharge

@@ -17,7 +17,7 @@ from __future__ import annotations
 import pandas as pd
 import vectorbt as vbt
 
-from src.engine.config import CostConfig
+from src.engine.costs import CostConfig, build_order_cost_arrays
 
 #: Positions non supportées par le moteur (v1 : long-only, tout-ou-rien).
 _SUPPORTED_POSITIONS = frozenset({0, 1})
@@ -71,6 +71,8 @@ def run_backtest(
     target_position: pd.Series,
     costs: CostConfig,
     initial_capital: float,
+    ttf_eligible: bool = False,
+    spread_pct: float = 0.0,
     freq: str = "1D",
 ) -> vbt.Portfolio:
     """Exécute un backtest à partir d'une position cible et d'une config de coûts.
@@ -81,8 +83,13 @@ def run_backtest(
         target_position: Position cible décidée à la clôture de chaque
             date (sortie de `Strategy.generate_signals`), valeurs dans
             `{0, 1}` (long-only tout-ou-rien).
-        costs: Coûts de transaction, appliqués à l'entrée et à la sortie.
+        costs: Coûts de transaction (grille de courtage, TTF, glissement
+            de base), appliqués à l'entrée et à la sortie.
         initial_capital: Capital de départ.
+        ttf_eligible: `True` si le titre est soumis à la taxe sur les
+            transactions financières (champ `ttf` de l'univers).
+        spread_pct: Spread propre au titre (champ `spread_pct` de
+            l'univers), ajouté au glissement de base.
         freq: Fréquence des barres, transmise à vectorbt.
 
     Returns:
@@ -96,13 +103,18 @@ def run_backtest(
     execution_position = shift_to_execution(target_position)
     entries, exits = positions_to_entries_exits(execution_position)
 
+    fees, fixed_fees, slippage = build_order_cost_arrays(
+        df["open"], entries, exits, initial_capital, costs, ttf_eligible, spread_pct
+    )
+
     return vbt.Portfolio.from_signals(
         close=df["close"],
         entries=entries,
         exits=exits,
         price=df["open"],
-        fees=costs.brokerage_fee_pct,
-        slippage=costs.slippage_pct,
+        fees=fees,
+        fixed_fees=fixed_fees,
+        slippage=slippage,
         init_cash=initial_capital,
         freq=freq,
     )
@@ -112,6 +124,8 @@ def run_buy_and_hold(
     df: pd.DataFrame,
     costs: CostConfig,
     initial_capital: float,
+    ttf_eligible: bool = False,
+    spread_pct: float = 0.0,
     freq: str = "1D",
 ) -> vbt.Portfolio:
     """Backtest de référence : achat en tout début de série, conservé jusqu'à la fin.
@@ -124,6 +138,10 @@ def run_buy_and_hold(
             `open` et `close`.
         costs: Coûts de transaction (appliqués une seule fois, à l'achat).
         initial_capital: Capital de départ.
+        ttf_eligible: `True` si le titre est soumis à la taxe sur les
+            transactions financières (champ `ttf` de l'univers).
+        spread_pct: Spread propre au titre (champ `spread_pct` de
+            l'univers), ajouté au glissement de base.
         freq: Fréquence des barres, transmise à vectorbt.
 
     Returns:
@@ -135,13 +153,18 @@ def run_buy_and_hold(
     exits = pd.Series(False, index=df.index)
     entries.iloc[0] = True
 
+    fees, fixed_fees, slippage = build_order_cost_arrays(
+        df["open"], entries, exits, initial_capital, costs, ttf_eligible, spread_pct
+    )
+
     return vbt.Portfolio.from_signals(
         close=df["close"],
         entries=entries,
         exits=exits,
         price=df["open"],
-        fees=costs.brokerage_fee_pct,
-        slippage=costs.slippage_pct,
+        fees=fees,
+        fixed_fees=fixed_fees,
+        slippage=slippage,
         init_cash=initial_capital,
         freq=freq,
     )

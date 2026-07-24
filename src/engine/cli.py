@@ -62,10 +62,16 @@ def main() -> None:
     )
     rows = compare(strategy_metrics, benchmark_metrics)
 
+    tiers_desc = ", ".join(
+        f"<= {t.max_order_value:.0f}€: {t.fixed_fee:.2f}€"
+        if t.fixed_fee is not None
+        else f"> seuil précédent: {t.pct_fee:.2%}"
+        for t in backtest_config.costs.brokerage_tiers
+    )
     print(f"Backtest {args.ticker} | {start} -> {end} | stratégie: SMA crossover {strategy.params}")
     print(
-        f"Coûts : {backtest_config.costs.brokerage_fee_pct:.2%} courtage + "
-        f"{backtest_config.costs.slippage_pct:.2%} slippage | capital initial : "
+        f"Coûts : courtage [{tiers_desc}] + TTF {backtest_config.costs.ttf_pct:.2%} (si éligible) + "
+        f"glissement de base {backtest_config.costs.base_slippage_pct:.2%} | capital initial : "
         f"{backtest_config.initial_capital:,.0f}"
     )
     print()

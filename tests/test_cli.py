@@ -75,8 +75,13 @@ initial_capital: 10000.0
 trading_days_per_year: 252
 risk_free_rate: 0.0
 costs:
-  brokerage_fee_pct: 0.006
-  slippage_pct: 0.0005
+  brokerage_tiers:
+    - max_order_value: 500.0
+      fixed_fee: 1.99
+    - max_order_value: null
+      pct_fee: 0.006
+  ttf_pct: 0.004
+  base_slippage_pct: 0.0005
 """,
         encoding="utf-8",
     )

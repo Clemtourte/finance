@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from src.engine.backtest import run_backtest, run_buy_and_hold
-from src.engine.config import CostConfig
+from src.engine.costs import BrokerageTier, CostConfig
 from src.metrics.comparison import compare
 from src.metrics.performance import (
     annualized_volatility,
@@ -142,7 +142,7 @@ def _linear_price_df(n: int = 30, start: float = 100.0, step: float = 1.0) -> pd
 
 def test_compute_metrics_open_position_counts_zero_closed_trades():
     df = _linear_price_df()
-    costs = CostConfig(brokerage_fee_pct=0.006, slippage_pct=0.0005)
+    costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.006),), ttf_pct=0.0, base_slippage_pct=0.0005)
     pf = run_buy_and_hold(df, costs, initial_capital=10_000.0)
 
     result = compute_metrics(pf, periods_per_year=252, risk_free_rate=0.0)
@@ -157,7 +157,7 @@ def test_compute_metrics_closed_trade_counts_one():
     target = pd.Series(1, index=df.index)
     target.iloc[-2] = 0
     target.iloc[-1] = 0
-    costs = CostConfig(brokerage_fee_pct=0.006, slippage_pct=0.0005)
+    costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.006),), ttf_pct=0.0, base_slippage_pct=0.0005)
     pf = run_backtest(df, target, costs, initial_capital=10_000.0)
 
     result = compute_metrics(pf, periods_per_year=252, risk_free_rate=0.0)
@@ -172,7 +172,7 @@ def test_compute_metrics_closed_trade_counts_one():
 
 def test_compare_produces_one_row_per_field_with_correct_delta():
     df = _linear_price_df(n=15)
-    costs = CostConfig(brokerage_fee_pct=0.006, slippage_pct=0.0005)
+    costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.006),), ttf_pct=0.0, base_slippage_pct=0.0005)
     target = pd.Series(1, index=df.index)
 
     strategy_pf = run_backtest(df, target, costs, initial_capital=10_000.0)
