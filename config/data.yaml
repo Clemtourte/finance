@@ -1,0 +1,35 @@
+# Paramètres de la couche données (ingestion, cache, validation, DuckDB).
+
+universe_file: config/universe_cac40.yaml
+
+period:
+  # Format ISO (YYYY-MM-DD). "today" est résolu dynamiquement à l'exécution.
+  start_date: "2010-01-01"
+  end_date: "today"
+
+# Répertoire du cache Parquet, partitionné par ticker (un fichier par ticker).
+cache_dir: data/cache
+
+# Base DuckDB dans laquelle les OHLCV validés sont chargés.
+duckdb:
+  path: data/warehouse.duckdb
+  table: ohlcv_daily
+
+# Comportement du provider yfinance.
+yfinance:
+  max_retries: 3
+  retry_backoff_seconds: 2.0
+  request_pause_seconds: 0.3
+
+# Seuils utilisés par les fonctions de validation (src/data/validation.py).
+validation:
+  # Un jour ouvré (Bourse de Paris) sans cotation au-delà de ce nombre de
+  # jours calendaires consécutifs est signalé comme un trou suspect.
+  max_gap_calendar_days: 5
+  # Rendement journalier absolu (close-to-close) au-delà duquel une séance
+  # est signalée comme valeur aberrante potentielle.
+  outlier_return_threshold: 0.30
+  # Ratio jour/veille (close ou adj_close) evoquant un split non ajusté :
+  # une variation proche de 2x, 3x, 0.5x, 0.33x, etc. sans mouvement de
+  # volume correspondant est suspecte.
+  split_ratio_tolerance: 0.03

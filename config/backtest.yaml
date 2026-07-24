@@ -1,0 +1,22 @@
+# Paramètres du moteur de backtest (src/engine/).
+#
+# Les coûts de transaction ne sont jamais optionnels : ils sont toujours
+# lus depuis ce fichier et appliqués à l'entrée ET à la sortie de chaque
+# position (voir src/engine/backtest.py).
+
+initial_capital: 10000.0
+
+# Nombre de séances de bourse par an, utilisé pour annualiser les métriques
+# (CAGR, volatilité, Sharpe, Sortino). 252 est la convention standard pour
+# Euronext Paris.
+trading_days_per_year: 252
+
+# Taux sans risque annuel, utilisé comme référence pour Sharpe et Sortino.
+risk_free_rate: 0.0
+
+costs:
+  # Courtage Boursobank, par transaction (à l'achat comme à la vente).
+  brokerage_fee_pct: 0.006
+  # Glissement estimé entre le prix de clôture qui déclenche le signal et
+  # le prix d'exécution réel à l'ouverture suivante.
+  slippage_pct: 0.0005

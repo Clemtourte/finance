@@ -1,0 +1,5 @@
+# Paramètres de la stratégie de référence (src/strategies/sma_crossover.py).
+# Sert de cas de test du moteur de backtest, pas de stratégie destinée à
+# être jugée rentable en soi.
+fast_period: 20
+slow_period: 50

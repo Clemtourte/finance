@@ -1,0 +1,129 @@
+# Univers de valeurs éligibles PEA - composition du CAC 40.
+#
+# Tickers au format Yahoo Finance (suffixe .PA pour Euronext Paris).
+# Composition arrêtée au 2026-07-24 (source : révision trimestrielle du
+# Conseil scientifique des indices, dernière entrée en vigueur le
+# 2025-12-22 : sortie d'Edenred, entrée d'Eiffage). À revérifier à chaque
+# révision trimestrielle (mars, juin, septembre, décembre) car la
+# composition peut changer.
+tickers:
+  - ticker: AC.PA
+    name: Accor
+    isin: FR0000120404
+  - ticker: AI.PA
+    name: Air Liquide
+    isin: FR0000120073
+  - ticker: AIR.PA
+    name: Airbus SE
+    isin: NL0000235190
+  - ticker: MT.PA
+    name: ArcelorMittal
+    isin: LU1598757687
+  - ticker: CS.PA
+    name: AXA
+    isin: FR0000120628
+  - ticker: BNP.PA
+    name: BNP Paribas
+    isin: FR0000131104
+  - ticker: EN.PA
+    name: Bouygues
+    isin: FR0000120503
+  - ticker: BVI.PA
+    name: Bureau Veritas
+    isin: FR0006174348
+  - ticker: CAP.PA
+    name: Capgemini
+    isin: FR0000125338
+  - ticker: CA.PA
+    name: Carrefour
+    isin: FR0000120172
+  - ticker: ACA.PA
+    name: Crédit Agricole
+    isin: FR0000045072
+  - ticker: BN.PA
+    name: Danone
+    isin: FR0000120644
+  - ticker: DSY.PA
+    name: Dassault Systèmes
+    isin: FR0014003TT8
+  - ticker: FGR.PA
+    name: Eiffage
+    isin: FR0000130452
+  - ticker: ENGI.PA
+    name: Engie
+    isin: FR0010208488
+  - ticker: EL.PA
+    name: EssilorLuxottica
+    isin: FR0000121667
+  - ticker: ERF.PA
+    name: Eurofins Scientific
+    isin: FR0014000MR3
+  - ticker: ENX.PA
+    name: Euronext
+    isin: NL0006294274
+  - ticker: RMS.PA
+    name: Hermès International
+    isin: FR0000052292
+  - ticker: KER.PA
+    name: Kering
+    isin: FR0000121485
+  - ticker: OR.PA
+    name: L'Oréal
+    isin: FR0000120321
+  - ticker: LR.PA
+    name: Legrand
+    isin: FR0010307819
+  - ticker: MC.PA
+    name: LVMH
+    isin: FR0000121014
+  - ticker: ML.PA
+    name: Michelin
+    isin: FR001400AJ45
+  - ticker: ORA.PA
+    name: Orange
+    isin: FR0000133308
+  - ticker: RI.PA
+    name: Pernod Ricard
+    isin: FR0000120693
+  - ticker: PUB.PA
+    name: Publicis Groupe
+    isin: FR0000130577
+  - ticker: RNO.PA
+    name: Renault
+    isin: FR0000131906
+  - ticker: SAF.PA
+    name: Safran
+    isin: FR0000073272
+  - ticker: SGO.PA
+    name: Saint-Gobain
+    isin: FR0000125007
+  - ticker: SAN.PA
+    name: Sanofi
+    isin: FR0000120578
+  - ticker: SU.PA
+    name: Schneider Electric
+    isin: FR0000121972
+  - ticker: GLE.PA
+    name: Société Générale
+    isin: FR0000130809
+  - ticker: STLAP.PA
+    name: Stellantis NV
+    isin: NL00150001Q9
+  - ticker: STMPA.PA
+    name: STMicroelectronics
+    isin: NL0000226223
+  - ticker: HO.PA
+    name: Thales
+    isin: FR0000121329
+  - ticker: TTE.PA
+    name: TotalEnergies SE
+    isin: FR0000120271
+  - ticker: URW.PA
+    name: Unibail-Rodamco-Westfield
+    isin: FR0013326246
+  - ticker: VIE.PA
+    name: Veolia Environnement
+    isin: FR0000124141
+  - ticker: DG.PA
+    name: Vinci
+    isin: FR0000125486

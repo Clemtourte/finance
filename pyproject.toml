@@ -1,0 +1,26 @@
+[project]
+name = "pea-backtest"
+version = "0.1.0"
+description = "Pipeline de backtest d'analyse technique sur actions PEA"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "duckdb>=1.5.5",
+    "pandas>=3.0.5",
+    "pandas-ta>=0.4.71b0",
+    "polars>=1.43.0",
+    "pyarrow>=25.0.0",
+    "pyyaml>=6.0.3",
+    "vectorbt>=0.28.2",
+    "yfinance>=0.2.40",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
