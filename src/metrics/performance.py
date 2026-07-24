@@ -230,7 +230,7 @@ class MetricsResult:
     sharpe_ratio: float
     sortino_ratio: float
     max_drawdown: float
-    max_drawdown_duration_days: int
+    max_drawdown_duration_bars: int
     win_rate: float
     profit_factor: float
     num_trades: int
@@ -278,7 +278,7 @@ def compute_metrics(
         sharpe_ratio=sharpe_ratio(returns, risk_free_rate, periods_per_year),
         sortino_ratio=sortino_ratio(returns, risk_free_rate, periods_per_year),
         max_drawdown=max_drawdown(equity),
-        max_drawdown_duration_days=max_drawdown_duration(equity),
+        max_drawdown_duration_bars=max_drawdown_duration(equity),
         win_rate=win_rate(pnl),
         profit_factor=profit_factor(pnl),
         num_trades=num_trades(pnl),

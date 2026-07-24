@@ -14,7 +14,7 @@ _PERCENT_METRICS = frozenset({"cagr", "annualized_volatility", "max_drawdown", "
 #: Métriques affichées comme un ratio à 2 décimales.
 _RATIO_METRICS = frozenset({"sharpe_ratio", "sortino_ratio", "profit_factor"})
 #: Métriques entières.
-_INT_METRICS = frozenset({"num_trades", "max_drawdown_duration_days"})
+_INT_METRICS = frozenset({"num_trades", "max_drawdown_duration_bars"})
 
 _HEADERS = ("Métrique", "Stratégie", "Buy & Hold", "Écart")
 
