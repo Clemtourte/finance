@@ -1,0 +1,4 @@
+# Paramètres de la stratégie de rééquilibrage par bandes
+# (src/strategies/rebalance_bandes.py).
+# Bande de tolérance symétrique autour de la référence courante.
+band_pct: 0.10

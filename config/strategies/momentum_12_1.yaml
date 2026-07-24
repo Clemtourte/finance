@@ -1,0 +1,4 @@
+# Paramètres de la stratégie momentum 12-1 (src/strategies/momentum_12_1.py).
+# Approximation en jours de bourse : 12 mois ~ 252 séances, 1 mois ~ 21 séances.
+lookback_days: 252
+skip_days: 21

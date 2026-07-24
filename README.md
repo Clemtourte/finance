@@ -13,8 +13,10 @@ Couches implémentées à ce stade :
   entrepôt DuckDB.
 - **`src/indicators/`** — wrappers `pandas-ta` (SMA, EMA, RSI, MACD, ATR,
   bandes de Bollinger).
-- **`src/strategies/`** — interface `Strategy` + stratégie de référence
-  (croisement de SMA).
+- **`src/strategies/`** — interface `Strategy` + croisement de SMA
+  (référence), momentum 12-1 mono-actif, rééquilibrage par bandes ; DCA
+  (apport programmé) via un moteur dédié minimal (pas via `Strategy`,
+  voir plus bas).
 - **`src/engine/`** — moteur de backtest (`vectorbt`), exécution J+1,
   coûts de transaction obligatoires.
 - **`src/metrics/`** — métriques de performance, stratégie vs buy & hold.
@@ -85,6 +87,33 @@ de la période ne génère donc aucun ordre. La date de fin de période se
 déduit uniquement du calendrier de cotation déjà connu, jamais d'une
 valeur future : aucun impact sur la convention d'exécution J -> J+1, qui
 s'applique ensuite normalement à la position échantillonnée.
+
+## Stratégies disponibles
+
+Toutes les stratégies ci-dessous, sauf le DCA, implémentent `Strategy`
+(`src/strategies/base.py`) et se branchent directement sur `run_backtest` :
+
+- **`sma_crossover.py`** — croisement de deux SMA, long au-dessus, flat
+  en-dessous. Stratégie de référence, sert de cas de test du moteur.
+- **`momentum_12_1.py`** — long si le rendement sur 12 mois hors dernier
+  mois est positif, flat sinon (mono-actif : comparaison à sa propre
+  trajectoire passée, pas de classement contre un univers).
+- **`rebalance_bandes.py`** — cible 100% investi ; le moteur ne
+  supportant que des positions tout-ou-rien (pas de pondération
+  fractionnaire multi-actifs), la bande s'applique à la dérive du prix
+  depuis une référence : écrêtage (sortie) si la dérive dépasse
+  `band_pct`, ré-entrée avec hystérésis quand le prix revient dans la
+  bande de la référence d'origine.
+
+**`dca.py`** (apport programmé mensuel) est différent : ce n'est pas une
+`Strategy` (elle ne décide pas d'une position cible sur un capital fixe,
+elle injecte un flux de capital externe et accumule des parts).
+`vectorbt.Portfolio.from_signals` ne modélise pas proprement des dépôts
+de cash périodiques ; le DCA est donc simulé par `simulate_dca`, un
+moteur minimal dédié qui réutilise le modèle de coûts de
+`src.engine.costs` mais ne passe pas par `run_backtest`. Achat au premier
+jour coté de chaque mois (fait de calendrier connu à l'avance, pas un
+signal), exécuté à l'`open` de ce jour.
 
 ## Installation
 
