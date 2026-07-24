@@ -11,11 +11,28 @@ import yaml
 
 @dataclass(frozen=True)
 class TickerInfo:
-    """Un titre de l'univers d'investissement."""
+    """Un titre de l'univers d'investissement.
+
+    `ttf` et `spread_pct` sont des champs propres au moteur de coûts
+    (`src.engine.costs`) : la couche données ne les utilise pas, ils ont
+    donc une valeur par défaut neutre pour ne pas casser un fichier
+    d'univers minimal (`ticker`/`name`/`isin` seulement).
+
+    Attributes:
+        ticker: Symbole au format yfinance (ex. `"AI.PA"`).
+        name: Nom du titre.
+        isin: Code ISIN.
+        ttf: `True` si le titre est soumis à la taxe française sur les
+            transactions financières (grandes capitalisations françaises).
+        spread_pct: Spread bid/ask propre au titre (fraction), utilisé
+            comme glissement additionnel par le moteur de backtest.
+    """
 
     ticker: str
     name: str
     isin: str
+    ttf: bool = False
+    spread_pct: float = 0.0
 
 
 @dataclass(frozen=True)

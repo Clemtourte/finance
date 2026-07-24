@@ -104,10 +104,23 @@ uv sync
 - `config/universe_cac40.yaml` — liste des 40 tickers du CAC 40 (format
   Yahoo Finance, suffixe `.PA`). La composition d'un indice change chaque
   trimestre : à revérifier périodiquement.
+- `config/universe_etf_pea.yaml` — 4 ETF PEA (CW8/EWLD monde, PSP5
+  S&P 500, ETZ Europe).
 - `config/data.yaml` — période d'historique, chemins de cache/DuckDB,
-  paramètres de résilience yfinance, seuils de validation.
+  paramètres de résilience yfinance, seuils de validation. `--config`
+  du CLI d'ingestion pointe toujours vers un seul fichier d'univers à la
+  fois (`universe_file`) ; pour ingérer les deux univers, ingérer l'un
+  puis l'autre en changeant temporairement `universe_file`, ou passer le
+  fichier voulu directement à `load_universe`.
 
-Aucune valeur n'est codée en dur dans `src/` : tout est lu depuis ces deux
+Chaque entrée d'univers porte, en plus de `ticker`/`name`/`isin`, deux
+champs consommés par le moteur de coûts (`src.engine.costs`) : `ttf`
+(éligibilité à la taxe sur les transactions financières) et `spread_pct`
+(spread bid/ask propre au titre). Voir les commentaires en tête de
+chaque fichier YAML pour la méthode et les limites de ces valeurs — **à
+vérifier avant tout usage réel**, ce ne sont que des points de départ.
+
+Aucune valeur n'est codée en dur dans `src/` : tout est lu depuis ces
 fichiers.
 
 ### 2. Lancer l'ingestion

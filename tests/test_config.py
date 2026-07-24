@@ -33,3 +33,27 @@ def test_load_universe_has_forty_unique_cac40_tickers():
     assert len(set(tickers)) == 40
     assert all(t.endswith(".PA") for t in tickers)
     assert all(t.isin for t in universe)
+    # Champs propres au moteur de coûts, chargés avec la couche données.
+    assert all(isinstance(t.ttf, bool) for t in universe)
+    assert all(t.spread_pct >= 0 for t in universe)
+    assert any(t.ttf for t in universe)  # au moins un titre français éligible TTF
+    assert any(not t.ttf for t in universe)  # au moins un titre non-FR (Airbus, ArcelorMittal, ...)
+
+
+def test_load_universe_etf_pea():
+    universe = load_universe(PROJECT_ROOT / "config" / "universe_etf_pea.yaml")
+
+    assert len(universe) == 4
+    tickers = {t.ticker for t in universe}
+    assert tickers == {"CW8.PA", "EWLD.PA", "PSP5.PA", "ETZ.PA"}
+    assert all(t.endswith(".PA") for t in tickers)
+    assert all(not t.ttf for t in universe)  # les ETF ne sont jamais soumis à la TTF
+    assert all(t.spread_pct > 0 for t in universe)
+
+
+def test_ticker_info_ttf_and_spread_default_when_absent():
+    from src.data.config import TickerInfo
+
+    minimal = TickerInfo(ticker="AI.PA", name="Air Liquide", isin="FR0000120073")
+    assert minimal.ttf is False
+    assert minimal.spread_pct == 0.0

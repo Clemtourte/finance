@@ -1,0 +1,37 @@
+# Univers d'ETF éligibles PEA, tickers au format Yahoo Finance (Euronext Paris).
+#
+# Sélection arrêtée au 2026-07-24 (vérifiée via recherche web à cette
+# date : nom exact du fonds, ticker Yahoo, ISIN). Un ETF PEA-éligible
+# réplique un indice hors zone euro/UE via réplication synthétique (swap)
+# tout en logeant le véhicule dans un pays UE — vérifier l'éligibilité
+# PEA effective (courtier, DICI) avant tout usage réel, elle peut changer.
+#
+# ttf : les parts d'ETF/fonds ne sont pas des actions de sociétés
+# françaises et ne sont donc pas soumises à la taxe sur les transactions
+# financières, quel que soit l'indice répliqué -> toujours false ici.
+#
+# spread_pct : place-holder à calibrer par titre à partir de données de
+# carnet d'ordres réelles (0,05% pour les ETF les plus liquides comme
+# CW8/PSP5, un peu plus large pour les ETF moins échangés) ; ne pas
+# prendre ces chiffres pour argent comptant.
+tickers:
+  - ticker: CW8.PA
+    name: "Amundi MSCI World Swap UCITS ETF EUR Acc (CW8)"
+    isin: LU1681043599
+    ttf: false
+    spread_pct: 0.0005
+  - ticker: EWLD.PA
+    name: "Amundi MSCI World Swap UCITS ETF EUR Dist (EWLD)"
+    isin: LU2655993207
+    ttf: false
+    spread_pct: 0.0007
+  - ticker: PSP5.PA
+    name: "Amundi PEA S&P 500 UCITS ETF Acc (PSP5)"
+    isin: FR0011871128
+    ttf: false
+    spread_pct: 0.0005
+  - ticker: ETZ.PA
+    name: "BNP Paribas Easy STOXX Europe 600 UCITS ETF EUR (ETZ)"
+    isin: FR0011550193
+    ttf: false
+    spread_pct: 0.0007

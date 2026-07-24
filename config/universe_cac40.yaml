@@ -6,124 +6,216 @@
 # 2025-12-22 : sortie d'Edenred, entrée d'Eiffage). À revérifier à chaque
 # révision trimestrielle (mars, juin, septembre, décembre) car la
 # composition peut changer.
+#
+# ttf : éligibilité à la taxe sur les transactions financières (France),
+# déduite du préfixe ISIN (FR = domicilié en France = éligible ; NL/LU =
+# non éligible). À VÉRIFIER contre la liste officielle publiée chaque
+# année par la DGFiP (sociétés françaises dont la capitalisation dépasse
+# 1 milliard d'euros) : le préfixe ISIN est une heuristique raisonnable,
+# pas une source faisant foi.
+#
+# spread_pct : place-holder uniforme (0,03%) en attendant un calibrage
+# par titre à partir de données de carnet d'ordres réelles ; les grandes
+# capitalisations du CAC 40 ont en pratique un spread plus resserré que
+# ce chiffre, mais une valeur uniforme évite une fausse précision.
 tickers:
   - ticker: AC.PA
     name: Accor
     isin: FR0000120404
+    ttf: true
+    spread_pct: 0.0003
   - ticker: AI.PA
     name: Air Liquide
     isin: FR0000120073
+    ttf: true
+    spread_pct: 0.0003
   - ticker: AIR.PA
     name: Airbus SE
     isin: NL0000235190
+    ttf: false
+    spread_pct: 0.0003
   - ticker: MT.PA
     name: ArcelorMittal
     isin: LU1598757687
+    ttf: false
+    spread_pct: 0.0003
   - ticker: CS.PA
     name: AXA
     isin: FR0000120628
+    ttf: true
+    spread_pct: 0.0003
   - ticker: BNP.PA
     name: BNP Paribas
     isin: FR0000131104
+    ttf: true
+    spread_pct: 0.0003
   - ticker: EN.PA
     name: Bouygues
     isin: FR0000120503
+    ttf: true
+    spread_pct: 0.0003
   - ticker: BVI.PA
     name: Bureau Veritas
     isin: FR0006174348
+    ttf: true
+    spread_pct: 0.0003
   - ticker: CAP.PA
     name: Capgemini
     isin: FR0000125338
+    ttf: true
+    spread_pct: 0.0003
   - ticker: CA.PA
     name: Carrefour
     isin: FR0000120172
+    ttf: true
+    spread_pct: 0.0003
   - ticker: ACA.PA
     name: Crédit Agricole
     isin: FR0000045072
+    ttf: true
+    spread_pct: 0.0003
   - ticker: BN.PA
     name: Danone
     isin: FR0000120644
+    ttf: true
+    spread_pct: 0.0003
   - ticker: DSY.PA
     name: Dassault Systèmes
     isin: FR0014003TT8
+    ttf: true
+    spread_pct: 0.0003
   - ticker: FGR.PA
     name: Eiffage
     isin: FR0000130452
+    ttf: true
+    spread_pct: 0.0003
   - ticker: ENGI.PA
     name: Engie
     isin: FR0010208488
+    ttf: true
+    spread_pct: 0.0003
   - ticker: EL.PA
     name: EssilorLuxottica
     isin: FR0000121667
+    ttf: true
+    spread_pct: 0.0003
   - ticker: ERF.PA
     name: Eurofins Scientific
     isin: FR0014000MR3
+    ttf: true
+    spread_pct: 0.0003
   - ticker: ENX.PA
     name: Euronext
     isin: NL0006294274
+    ttf: false
+    spread_pct: 0.0003
   - ticker: RMS.PA
     name: Hermès International
     isin: FR0000052292
+    ttf: true
+    spread_pct: 0.0003
   - ticker: KER.PA
     name: Kering
     isin: FR0000121485
+    ttf: true
+    spread_pct: 0.0003
   - ticker: OR.PA
     name: L'Oréal
     isin: FR0000120321
+    ttf: true
+    spread_pct: 0.0003
   - ticker: LR.PA
     name: Legrand
     isin: FR0010307819
+    ttf: true
+    spread_pct: 0.0003
   - ticker: MC.PA
     name: LVMH
     isin: FR0000121014
+    ttf: true
+    spread_pct: 0.0003
   - ticker: ML.PA
     name: Michelin
     isin: FR001400AJ45
+    ttf: true
+    spread_pct: 0.0003
   - ticker: ORA.PA
     name: Orange
     isin: FR0000133308
+    ttf: true
+    spread_pct: 0.0003
   - ticker: RI.PA
     name: Pernod Ricard
     isin: FR0000120693
+    ttf: true
+    spread_pct: 0.0003
   - ticker: PUB.PA
     name: Publicis Groupe
     isin: FR0000130577
+    ttf: true
+    spread_pct: 0.0003
   - ticker: RNO.PA
     name: Renault
     isin: FR0000131906
+    ttf: true
+    spread_pct: 0.0003
   - ticker: SAF.PA
     name: Safran
     isin: FR0000073272
+    ttf: true
+    spread_pct: 0.0003
   - ticker: SGO.PA
     name: Saint-Gobain
     isin: FR0000125007
+    ttf: true
+    spread_pct: 0.0003
   - ticker: SAN.PA
     name: Sanofi
     isin: FR0000120578
+    ttf: true
+    spread_pct: 0.0003
   - ticker: SU.PA
     name: Schneider Electric
     isin: FR0000121972
+    ttf: true
+    spread_pct: 0.0003
   - ticker: GLE.PA
     name: Société Générale
     isin: FR0000130809
+    ttf: true
+    spread_pct: 0.0003
   - ticker: STLAP.PA
     name: Stellantis NV
     isin: NL00150001Q9
+    ttf: false
+    spread_pct: 0.0003
   - ticker: STMPA.PA
     name: STMicroelectronics
     isin: NL0000226223
+    ttf: false
+    spread_pct: 0.0003
   - ticker: HO.PA
     name: Thales
     isin: FR0000121329
+    ttf: true
+    spread_pct: 0.0003
   - ticker: TTE.PA
     name: TotalEnergies SE
     isin: FR0000120271
+    ttf: true
+    spread_pct: 0.0003
   - ticker: URW.PA
     name: Unibail-Rodamco-Westfield
     isin: FR0013326246
+    ttf: true
+    spread_pct: 0.0003
   - ticker: VIE.PA
     name: Veolia Environnement
     isin: FR0000124141
+    ttf: true
+    spread_pct: 0.0003
   - ticker: DG.PA
     name: Vinci
     isin: FR0000125486
+    ttf: true
+    spread_pct: 0.0003
