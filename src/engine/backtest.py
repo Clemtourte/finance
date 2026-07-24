@@ -14,6 +14,7 @@ qui exécute un backtest sans coûts.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
@@ -21,6 +22,58 @@ from src.engine.costs import CostConfig, build_order_cost_arrays
 
 #: Positions non supportées par le moteur (v1 : long-only, tout-ou-rien).
 _SUPPORTED_POSITIONS = frozenset({0, 1})
+
+#: Fréquences de rééquilibrage supportées et leur code de période pandas.
+_REBALANCE_PERIOD_CODES = {"weekly": "W", "monthly": "M"}
+
+
+def resample_target_position(target_position: pd.Series, rebalance_freq: str) -> pd.Series:
+    """Échantillonne la position cible aux dates de rééquilibrage.
+
+    Le signal reste calculé quotidiennement par la stratégie (aucun
+    changement côté `Strategy.generate_signals`) ; seule son
+    *application* est échantillonnée ici : un changement de position
+    cible ne compte que s'il est décidé à la dernière séance d'une
+    période (semaine ou mois). Entre deux dates de rééquilibrage, la
+    position appliquée reste celle décidée à la dernière date de
+    rééquilibrage déjà passée, même si le signal quotidien a varié
+    entre-temps.
+
+    Aucun look-ahead : la date de fin de période (dernière séance
+    effectivement cotée d'une semaine/d'un mois) se déduit uniquement du
+    calendrier de cotation déjà connu (l'index de `target_position`),
+    jamais d'une valeur de prix ou de signal future. Le masquage/`ffill`
+    ci-dessous ne propage que des valeurs déjà observées, jamais une
+    valeur qui ne sera décidée que plus tard dans la période en cours.
+
+    Args:
+        target_position: Position cible quotidienne (sortie de
+            `Strategy.generate_signals`).
+        rebalance_freq: `"daily"` (aucun échantillonnage), `"weekly"` ou
+            `"monthly"`.
+
+    Returns:
+        Position cible échantillonnée, même index que `target_position`.
+        `0` avant la première date de rééquilibrage (aucune décision
+        antérieure disponible).
+
+    Raises:
+        ValueError: Si `rebalance_freq` n'est pas une valeur supportée.
+    """
+    if rebalance_freq == "daily":
+        return target_position
+
+    if rebalance_freq not in _REBALANCE_PERIOD_CODES:
+        raise ValueError(
+            f"rebalance_freq={rebalance_freq!r} non supporté : "
+            f"attendu 'daily', 'weekly' ou 'monthly'"
+        )
+
+    period = target_position.index.to_period(_REBALANCE_PERIOD_CODES[rebalance_freq])
+    is_period_end = np.append(period[:-1] != period[1:], True)  # dernière barre = fin de série
+
+    masked = target_position.where(pd.Series(is_period_end, index=target_position.index))
+    return masked.ffill().fillna(0).astype(int)
 
 
 def shift_to_execution(target_position: pd.Series) -> pd.Series:
@@ -73,6 +126,7 @@ def run_backtest(
     initial_capital: float,
     ttf_eligible: bool = False,
     spread_pct: float = 0.0,
+    rebalance_freq: str = "daily",
     freq: str = "1D",
 ) -> vbt.Portfolio:
     """Exécute un backtest à partir d'une position cible et d'une config de coûts.
@@ -90,17 +144,21 @@ def run_backtest(
             transactions financières (champ `ttf` de l'univers).
         spread_pct: Spread propre au titre (champ `spread_pct` de
             l'univers), ajouté au glissement de base.
+        rebalance_freq: `"daily"` (défaut), `"weekly"` ou `"monthly"` —
+            voir `resample_target_position`.
         freq: Fréquence des barres, transmise à vectorbt.
 
     Returns:
         `vectorbt.Portfolio` du backtest, exécuté à l'open de J+1 pour un
-        signal décidé à la clôture de J.
+        signal décidé à la clôture de J (dernière séance de la période de
+        rééquilibrage).
 
     Raises:
         ValueError: Si `target_position` contient des valeurs hors `{0, 1}`.
     """
     _validate_positions(target_position)
-    execution_position = shift_to_execution(target_position)
+    sampled_position = resample_target_position(target_position, rebalance_freq)
+    execution_position = shift_to_execution(sampled_position)
     entries, exits = positions_to_entries_exits(execution_position)
 
     fees, fixed_fees, slippage = build_order_cost_arrays(

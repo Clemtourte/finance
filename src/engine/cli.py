@@ -37,11 +37,18 @@ def main() -> None:
     parser.add_argument("--start", type=_parse_date, default=None, help="Surcharge la date de début (YYYY-MM-DD)")
     parser.add_argument("--end", type=_parse_date, default=None, help="Surcharge la date de fin (YYYY-MM-DD)")
     parser.add_argument("--output-csv", default=None, help="Chemin d'export CSV du tableau de comparaison")
+    parser.add_argument(
+        "--rebalance-freq",
+        default=None,
+        choices=["daily", "weekly", "monthly"],
+        help="Surcharge la fréquence de rééquilibrage du fichier de config",
+    )
     args = parser.parse_args()
 
     data_config = load_data_config(args.data_config)
     backtest_config = load_backtest_config(args.backtest_config)
     strategy = load_sma_crossover_strategy(args.strategy_config)
+    rebalance_freq = args.rebalance_freq or backtest_config.rebalance_freq
 
     start = args.start or data_config.start_date
     end = args.end or data_config.end_date
@@ -50,7 +57,11 @@ def main() -> None:
 
     target_position = strategy.generate_signals(df)
     strategy_pf = run_backtest(
-        df, target_position, backtest_config.costs, backtest_config.initial_capital
+        df,
+        target_position,
+        backtest_config.costs,
+        backtest_config.initial_capital,
+        rebalance_freq=rebalance_freq,
     )
     benchmark_pf = run_buy_and_hold(df, backtest_config.costs, backtest_config.initial_capital)
 
@@ -68,7 +79,10 @@ def main() -> None:
         else f"> seuil précédent: {t.pct_fee:.2%}"
         for t in backtest_config.costs.brokerage_tiers
     )
-    print(f"Backtest {args.ticker} | {start} -> {end} | stratégie: SMA crossover {strategy.params}")
+    print(
+        f"Backtest {args.ticker} | {start} -> {end} | stratégie: SMA crossover {strategy.params} "
+        f"| rééquilibrage: {rebalance_freq}"
+    )
     print(
         f"Coûts : courtage [{tiers_desc}] + TTF {backtest_config.costs.ttf_pct:.2%} (si éligible) + "
         f"glissement de base {backtest_config.costs.base_slippage_pct:.2%} | capital initial : "

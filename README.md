@@ -72,6 +72,20 @@ pour déterminer, ordre par ordre, le palier applicable et le capital
 réellement disponible, puis fournit à `vectorbt` des tableaux `fees` /
 `fixed_fees` / `slippage` par barre plutôt qu'un scalaire unique.
 
+## Fréquence de rééquilibrage
+
+Par défaut (`rebalance_freq: daily`), un changement de position cible est
+appliqué dès qu'il est décidé. Avec `weekly` ou `monthly`
+(`config/backtest.yaml`, ou `--rebalance-freq` en CLI), un changement de
+position cible n'est pris en compte qu'à la dernière séance cotée de la
+période — le signal reste calculé quotidiennement par la stratégie, seule
+son application est échantillonnée (`resample_target_position`). Une
+oscillation intra-semaine/mois qui revient à son état de départ à la fin
+de la période ne génère donc aucun ordre. La date de fin de période se
+déduit uniquement du calendrier de cotation déjà connu, jamais d'une
+valeur future : aucun impact sur la convention d'exécution J -> J+1, qui
+s'applique ensuite normalement à la position échantillonnée.
+
 ## Installation
 
 Prérequis : [uv](https://docs.astral.sh/uv/). `uv sync` télécharge

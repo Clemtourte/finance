@@ -14,6 +14,12 @@ trading_days_per_year: 252
 # Taux sans risque annuel, utilisé comme référence pour Sharpe et Sortino.
 risk_free_rate: 0.0
 
+# Fréquence à laquelle un changement de position cible est effectivement
+# appliqué : "daily" (défaut), "weekly" ou "monthly". Le signal reste
+# calculé quotidiennement par la stratégie ; seule l'application est
+# échantillonnée (voir src/engine/backtest.py:resample_target_position).
+rebalance_freq: daily
+
 costs:
   # Grille de courtage BoursoBank (ordre "Découverte", Euronext), par
   # paliers sur la valeur de l'ordre. À VÉRIFIER / AJUSTER selon la

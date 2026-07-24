@@ -16,6 +16,7 @@ import pytest
 
 from src.engine.backtest import (
     positions_to_entries_exits,
+    resample_target_position,
     run_backtest,
     run_buy_and_hold,
     shift_to_execution,
@@ -110,6 +111,72 @@ def test_positions_to_entries_exits_marks_transitions_only():
     entries, exits = positions_to_entries_exits(execution_position)
     assert entries.tolist() == [False, False, True, False, False, False]
     assert exits.tolist() == [False, False, False, False, False, True]
+
+
+# --- resample_target_position : échantillonnage du rééquilibrage -----------
+
+
+def test_resample_daily_is_a_noop():
+    idx = pd.bdate_range("2024-01-01", periods=5)
+    target = pd.Series([0, 1, 0, 1, 1], index=idx)
+    resampled = resample_target_position(target, "daily")
+    assert resampled.tolist() == target.tolist()
+
+
+def test_resample_rejects_unsupported_frequency():
+    idx = pd.bdate_range("2024-01-01", periods=5)
+    target = pd.Series(1, index=idx)
+    with pytest.raises(ValueError):
+        resample_target_position(target, "hourly")
+
+
+def test_resample_weekly_ignores_intraweek_oscillation():
+    # 2024-01-01 est un lundi -> deux semaines pleines Lun-Ven.
+    idx = pd.bdate_range("2024-01-01", periods=10)
+    # Les deux vendredis (fin de semaine, index 4 et 9) valent 0 ; le
+    # signal quotidien oscille en semaine mais ne doit jamais compter.
+    target = pd.Series([0, 1, 0, 1, 0, 0, 1, 1, 0, 0], index=idx)
+
+    resampled = resample_target_position(target, "weekly")
+
+    assert (resampled == 0).all()
+
+
+def test_resample_weekly_applies_change_decided_at_friday_close():
+    idx = pd.bdate_range("2024-01-01", periods=10)
+    # Vendredi de la semaine 1 (index 4) décide 1 ; le reste de la
+    # semaine 2 confirme 1 (vendredi de la semaine 2, index 9, aussi 1).
+    target = pd.Series([0, 0, 0, 0, 1, 1, 1, 1, 1, 1], index=idx)
+
+    resampled = resample_target_position(target, "weekly")
+
+    assert resampled.tolist() == [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+
+
+def test_resample_weekly_oscillation_generates_no_order_end_to_end():
+    idx = pd.bdate_range("2024-01-01", periods=10)
+    target = pd.Series([0, 1, 0, 1, 0, 0, 1, 1, 0, 0], index=idx)
+    df = _linear_price_df(n=10)
+
+    pf = run_backtest(df, target, _ZERO_COSTS, initial_capital=10_000.0, rebalance_freq="weekly")
+
+    assert len(pf.orders.records_readable) == 0
+
+
+def test_resample_weekly_end_to_end_respects_execution_lag():
+    idx = pd.bdate_range("2024-01-01", periods=10)
+    target = pd.Series([0, 0, 0, 0, 1, 1, 1, 1, 1, 1], index=idx)
+    df = _linear_price_df(n=10)
+
+    pf = run_backtest(df, target, _ZERO_COSTS, initial_capital=10_000.0, rebalance_freq="weekly")
+    orders = pf.orders.records_readable
+
+    assert len(orders) == 1
+    assert orders.iloc[0]["Side"] == "Buy"
+    # Décidé au vendredi de la semaine 1 (index 4) -> exécuté au lundi de
+    # la semaine 2 (index 5), pas avant.
+    assert orders.iloc[0]["Timestamp"] == df.index[5]
+    assert orders.iloc[0]["Price"] == pytest.approx(df["open"].iloc[5])
 
 
 # --- run_backtest : rendement connu sur série synthétique ------------------
