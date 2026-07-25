@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date
 
 import pandas as pd
 import vectorbt as vbt
@@ -237,16 +238,26 @@ class MetricsResult:
     turnover: float
 
 
-def compute_metrics(
-    portfolio: vbt.Portfolio,
+def compute_metrics_from_series(
+    equity: pd.Series,
+    trades: pd.DataFrame,
     periods_per_year: int,
     risk_free_rate: float,
 ) -> MetricsResult:
-    """Calcule l'ensemble des métriques pour un `vectorbt.Portfolio`.
+    """Calcule l'ensemble des métriques à partir d'une équité et d'un journal de trades.
+
+    Fonction de bas niveau utilisée par `compute_metrics` (sur un
+    portefeuille entier) et par `split_portfolio_by_date` (sur une
+    sous-période in-sample/out-of-sample) : toutes deux se ramènent à une
+    Series d'équité et un DataFrame de trades, sur lesquels les mêmes
+    formules s'appliquent sans changement (`cagr`, `max_drawdown`, etc.
+    sont relatifs à la série passée, jamais à une référence globale).
 
     Args:
-        portfolio: Portefeuille issu de `src.engine.backtest.run_backtest`
-            ou `run_buy_and_hold`.
+        equity: Valeur du portefeuille, indexée par date croissante.
+        trades: `portfolio.trades.records_readable` (ou un sous-ensemble
+            de ses lignes), avec au moins les colonnes `Status`, `PnL`,
+            `Size`, `Avg Entry Price`, `Avg Exit Price`.
         periods_per_year: Nombre de périodes (séances) par an.
         risk_free_rate: Taux sans risque annuel (fraction).
 
@@ -258,10 +269,8 @@ def compute_metrics(
         valorisée au marché dans l'équité mais n'est pas comptée comme un
         trade réalisé).
     """
-    equity = portfolio.value()
     returns = periodic_returns(equity)
 
-    trades = portfolio.trades.records_readable
     closed = trades[trades["Status"] == "Closed"] if len(trades) else trades
     pnl = closed["PnL"] if "PnL" in closed else pd.Series(dtype=float)
 
@@ -284,3 +293,61 @@ def compute_metrics(
         num_trades=num_trades(pnl),
         turnover=turnover(traded_notional, float(equity.mean())),
     )
+
+
+def compute_metrics(
+    portfolio: vbt.Portfolio,
+    periods_per_year: int,
+    risk_free_rate: float,
+) -> MetricsResult:
+    """Calcule l'ensemble des métriques pour un `vectorbt.Portfolio`.
+
+    Args:
+        portfolio: Portefeuille issu de `src.engine.backtest.run_backtest`
+            ou `run_buy_and_hold`.
+        periods_per_year: Nombre de périodes (séances) par an.
+        risk_free_rate: Taux sans risque annuel (fraction).
+
+    Returns:
+        `MetricsResult` consolidé (voir `compute_metrics_from_series`).
+    """
+    return compute_metrics_from_series(
+        portfolio.value(), portfolio.trades.records_readable, periods_per_year, risk_free_rate
+    )
+
+
+def split_portfolio_by_date(
+    portfolio: vbt.Portfolio, split_date: date
+) -> tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
+    """Découpe l'équité et les trades d'un portefeuille en in-sample / out-of-sample.
+
+    Un trade est affecté à la sous-période de sa date d'**entrée**
+    (convention simple pour les trades qui chevauchent la date de
+    coupure). L'équité de chaque sous-période est reprise telle quelle
+    (pas re-basée à 100) : `compute_metrics_from_series` calcule déjà ses
+    métriques relativement au premier point de la série passée.
+
+    Args:
+        portfolio: Portefeuille complet (`run_backtest` ou `run_buy_and_hold`).
+        split_date: Date de coupure ; in-sample = dates < `split_date`,
+            out-of-sample = dates >= `split_date`.
+
+    Returns:
+        Tuple `(equity_is, trades_is, equity_oos, trades_oos)`.
+    """
+    equity = portfolio.value()
+    trades = portfolio.trades.records_readable
+    split_ts = pd.Timestamp(split_date)
+
+    equity_is = equity[equity.index < split_ts]
+    equity_oos = equity[equity.index >= split_ts]
+
+    if len(trades):
+        entry_ts = pd.to_datetime(trades["Entry Timestamp"])
+        trades_is = trades[entry_ts < split_ts]
+        trades_oos = trades[entry_ts >= split_ts]
+    else:
+        trades_is = trades
+        trades_oos = trades
+
+    return equity_is, trades_is, equity_oos, trades_oos

@@ -115,6 +115,28 @@ moteur minimal dédié qui réutilise le modèle de coûts de
 jour coté de chaque mois (fait de calendrier connu à l'avance, pas un
 signal), exécuté à l'`open` de ce jour.
 
+## In-sample / out-of-sample
+
+Le CLI (`src.engine.cli`) **exige** `--split-date YYYY-MM-DD` : les
+métriques sont alors calculées et affichées séparément pour la période
+avant la date de coupure (in-sample) et à partir de cette date
+(out-of-sample), chacune avec son propre tableau stratégie vs buy & hold.
+Un backtest sur la période complète sans regarder si la performance tient
+hors échantillon est la manière la plus facile de se convaincre à tort
+qu'une stratégie fonctionne — ce garde-fou empêche de l'oublier.
+
+Le signal continue d'être calculé sur l'historique complet (les
+indicateurs ont leur période de chauffe normale avant la coupure, pas un
+démarrage à froid artificiel à la date de split) ; seul le **découpage
+des métriques** se fait après coup, sur l'équité et le journal de trades
+déjà produits par un backtest unique et continu
+(`split_portfolio_by_date`). Un trade qui chevauche la date de coupure
+est rattaché à la sous-période de sa date d'entrée.
+
+Pour tourner sans découpage (déconseillé hors exploration rapide), passer
+`--no-split` explicitement : la sortie l'indique alors clairement en tête
+de rapport.
+
 ## Installation
 
 Prérequis : [uv](https://docs.astral.sh/uv/). `uv sync` télécharge
@@ -214,17 +236,19 @@ print(report.has_issues, report.gaps, report.outliers, report.unadjusted_splits)
 
 ### 5. Lancer un backtest complet sur un ticker
 
-Une fois le ticker ingéré (étape 2), lancez :
+Une fois le ticker ingéré (étape 2), lancez (voir [In-sample /
+out-of-sample](#in-sample--out-of-sample) : `--split-date` est requis) :
 
 ```bash
-make backtest TICKER=AI.PA
+make backtest TICKER=AI.PA SPLIT=2020-01-01
 # équivalent :
-uv run python -m src.engine.cli --ticker AI.PA
+uv run python -m src.engine.cli --ticker AI.PA --split-date 2020-01-01
 ```
 
 Options utiles : `--strategy-config` (autre fichier de paramètres de
 stratégie), `--start` / `--end` (surcharge de la période), `--output-csv`
-(export du tableau de comparaison).
+(export du tableau de comparaison, un fichier par sous-période),
+`--rebalance-freq`, `--no-split` (période complète, non recommandé).
 
 Le CLI :
 
@@ -233,9 +257,9 @@ Le CLI :
    (`config/strategies/sma_crossover.yaml`) ;
 3. exécute le backtest de la stratégie **et** un buy & hold de référence,
    avec les mêmes coûts (`config/backtest.yaml`) ;
-4. affiche un tableau comparatif (CAGR, volatilité, Sharpe, Sortino, max
-   drawdown et sa durée, win rate, profit factor, nombre de trades,
-   turnover — stratégie, buy & hold, écart).
+4. affiche un tableau comparatif par sous-période (CAGR, volatilité,
+   Sharpe, Sortino, max drawdown et sa durée, win rate, profit factor,
+   nombre de trades, turnover — stratégie, buy & hold, écart).
 
 ### 6. Utiliser indicateurs / stratégies / moteur dans du code Python
 

@@ -8,6 +8,7 @@ de formule (mauvais ddof, oubli de racine carrée, etc.).
 from __future__ import annotations
 
 import math
+from datetime import date
 
 import pandas as pd
 import pytest
@@ -26,6 +27,7 @@ from src.metrics.performance import (
     profit_factor,
     sharpe_ratio,
     sortino_ratio,
+    split_portfolio_by_date,
     turnover,
     win_rate,
 )
@@ -190,3 +192,63 @@ def test_compare_produces_one_row_per_field_with_correct_delta():
     assert row_by_metric["cagr"].delta == pytest.approx(
         strategy_metrics.cagr - benchmark_metrics.cagr, nan_ok=True
     )
+
+
+# --- split_portfolio_by_date (in-sample / out-of-sample) --------------------
+
+
+def test_split_portfolio_by_date_partitions_equity_by_index():
+    df = _linear_price_df(n=40)
+    costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.0),), ttf_pct=0.0, base_slippage_pct=0.0)
+    pf = run_buy_and_hold(df, costs, initial_capital=10_000.0)
+
+    split_date = df.index[20].date()
+    equity_is, _, equity_oos, _ = split_portfolio_by_date(pf, split_date)
+
+    assert (equity_is.index < pd.Timestamp(split_date)).all()
+    assert (equity_oos.index >= pd.Timestamp(split_date)).all()
+    assert len(equity_is) + len(equity_oos) == len(pf.value())
+    assert equity_is.index[-1] == df.index[19]
+    assert equity_oos.index[0] == df.index[20]
+
+
+def test_split_portfolio_by_date_assigns_trades_by_entry_timestamp():
+    df = _linear_price_df(n=40)
+    costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.0),), ttf_pct=0.0, base_slippage_pct=0.0)
+    # Une position ouverte tôt et soldée tôt (in-sample), une autre
+    # ouverte et soldée tard (out-of-sample).
+    target = pd.Series(0, index=df.index)
+    target.iloc[2:8] = 1  # aller-retour in-sample
+    target.iloc[25:35] = 1  # aller-retour out-of-sample
+
+    pf = run_backtest(df, target, costs, initial_capital=10_000.0)
+    split_date = df.index[20].date()
+
+    _, trades_is, _, trades_oos = split_portfolio_by_date(pf, split_date)
+
+    assert len(trades_is) == 1
+    assert len(trades_oos) == 1
+    assert pd.Timestamp(trades_is.iloc[0]["Entry Timestamp"]) < pd.Timestamp(split_date)
+    assert pd.Timestamp(trades_oos.iloc[0]["Entry Timestamp"]) >= pd.Timestamp(split_date)
+
+
+def test_split_portfolio_metrics_differ_from_combined():
+    df = _linear_price_df(n=40, start=100.0, step=1.0)
+    costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.0),), ttf_pct=0.0, base_slippage_pct=0.0)
+    pf = run_buy_and_hold(df, costs, initial_capital=10_000.0)
+
+    split_date = df.index[20].date()
+    equity_is, trades_is, equity_oos, trades_oos = split_portfolio_by_date(pf, split_date)
+
+    from src.metrics.performance import compute_metrics_from_series
+
+    metrics_is = compute_metrics_from_series(equity_is, trades_is, periods_per_year=252, risk_free_rate=0.0)
+    metrics_oos = compute_metrics_from_series(equity_oos, trades_oos, periods_per_year=252, risk_free_rate=0.0)
+    metrics_full = compute_metrics(pf, periods_per_year=252, risk_free_rate=0.0)
+
+    # CAGR se rebase sur le premier point de chaque sous-période -> les
+    # trois valeurs doivent être distinctes sur une trajectoire non
+    # linéaire en %  (le prix est linéaire en valeur absolue, donc le
+    # rendement % ralentit avec le temps).
+    assert metrics_is.cagr != pytest.approx(metrics_oos.cagr)
+    assert metrics_full.cagr != pytest.approx(metrics_is.cagr)

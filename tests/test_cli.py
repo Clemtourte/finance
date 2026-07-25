@@ -97,7 +97,7 @@ costs:
     }
 
 
-def test_cli_runs_end_to_end_and_writes_csv(workspace, monkeypatch, capsys):
+def test_cli_no_split_runs_end_to_end_and_writes_csv(workspace, monkeypatch, capsys):
     argv = [
         "prog",
         "--ticker",
@@ -110,6 +110,7 @@ def test_cli_runs_end_to_end_and_writes_csv(workspace, monkeypatch, capsys):
         str(workspace["strategy_config"]),
         "--output-csv",
         str(workspace["output_csv"]),
+        "--no-split",
     ]
     monkeypatch.setattr(sys, "argv", argv)
 
@@ -118,6 +119,7 @@ def test_cli_runs_end_to_end_and_writes_csv(workspace, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "cagr" in captured.out
     assert "Buy & Hold" in captured.out
+    assert "AUCUN découpage" in captured.out
 
     df = pd.read_csv(workspace["output_csv"])
     assert set(df["metric"]) >= {"cagr", "sharpe_ratio", "max_drawdown", "num_trades"}
@@ -134,8 +136,68 @@ def test_cli_raises_clear_error_for_unknown_ticker(workspace, monkeypatch):
         str(workspace["backtest_config"]),
         "--strategy-config",
         str(workspace["strategy_config"]),
+        "--no-split",
     ]
     monkeypatch.setattr(sys, "argv", argv)
 
     with pytest.raises(ValueError, match="Aucune donnée"):
         main()
+
+
+def test_cli_refuses_to_run_without_split_date_or_no_split(workspace, monkeypatch, capsys):
+    argv = [
+        "prog",
+        "--ticker",
+        "AI.PA",
+        "--data-config",
+        str(workspace["data_config"]),
+        "--backtest-config",
+        str(workspace["backtest_config"]),
+        "--strategy-config",
+        str(workspace["strategy_config"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit):
+        main()
+
+    captured = capsys.readouterr()
+    assert "--split-date" in captured.err
+
+
+def test_cli_with_split_date_prints_is_and_oos_tables_and_writes_two_csvs(
+    workspace, monkeypatch, capsys
+):
+    argv = [
+        "prog",
+        "--ticker",
+        "AI.PA",
+        "--data-config",
+        str(workspace["data_config"]),
+        "--backtest-config",
+        str(workspace["backtest_config"]),
+        "--strategy-config",
+        str(workspace["strategy_config"]),
+        "--split-date",
+        "2023-06-01",
+        "--output-csv",
+        str(workspace["output_csv"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "In-sample" in captured.out
+    assert "Out-of-sample" in captured.out
+    assert "AUCUN découpage" not in captured.out
+
+    is_path = workspace["output_csv"].with_name("out_in_sample.csv")
+    oos_path = workspace["output_csv"].with_name("out_out_of_sample.csv")
+    assert is_path.exists()
+    assert oos_path.exists()
+
+    is_df = pd.read_csv(is_path)
+    oos_df = pd.read_csv(oos_path)
+    assert set(is_df["metric"]) >= {"cagr", "sharpe_ratio"}
+    assert set(oos_df["metric"]) >= {"cagr", "sharpe_ratio"}
