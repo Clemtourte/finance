@@ -1,13 +1,20 @@
-"""Tableau de comparaison stratégie vs buy & hold (console + CSV)."""
+"""Tableaux de reporting (console + CSV) : comparaison stratégie vs buy &
+hold, et récapitulatif de backtest sur un univers entier."""
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from src.metrics.comparison import ComparisonRow
+
+if TYPE_CHECKING:
+    # Import différé (type-checking uniquement) pour éviter un cycle avec
+    # src.engine.batch, qui importe ce module pour formater sa sortie.
+    from src.engine.batch import BatchResult
 
 #: Métriques affichées en pourcentage (ex. `12.34%`).
 _PERCENT_METRICS = frozenset(
@@ -42,6 +49,22 @@ def _format_value(metric: str, value: float) -> str:
     return f"{value:.4f}"
 
 
+def _render_table(headers: tuple[str, ...], formatted_rows: list[tuple[str, ...]]) -> str:
+    """Rend un tableau texte aligné (1re colonne à gauche, le reste à droite)."""
+    all_rows = [headers, *formatted_rows]
+    widths = [max(len(r[i]) for r in all_rows) for i in range(len(headers))]
+
+    def _render_row(cells: tuple[str, ...]) -> str:
+        aligned = [cells[0].ljust(widths[0])] + [
+            cell.rjust(widths[i]) for i, cell in enumerate(cells[1:], start=1)
+        ]
+        return " | ".join(aligned)
+
+    lines = [_render_row(headers), "-+-".join("-" * w for w in widths)]
+    lines.extend(_render_row(row) for row in formatted_rows)
+    return "\n".join(lines)
+
+
 def format_comparison_table(rows: list[ComparisonRow]) -> str:
     """Formate un tableau texte aligné, une ligne par métrique.
 
@@ -60,18 +83,65 @@ def format_comparison_table(rows: list[ComparisonRow]) -> str:
         )
         for row in rows
     ]
-    all_rows = [_HEADERS, *formatted_rows]
-    widths = [max(len(r[i]) for r in all_rows) for i in range(len(_HEADERS))]
+    return _render_table(_HEADERS, formatted_rows)
 
-    def _render(cells: tuple[str, ...]) -> str:
-        aligned = [cells[0].ljust(widths[0])] + [
-            cell.rjust(widths[i]) for i, cell in enumerate(cells[1:], start=1)
+
+_BATCH_HEADERS = ("Ticker", "Nom", "CAGR strat. (OOS)", "CAGR B&H (OOS)", "Écart", "Friction %", "Verdict")
+
+
+def format_batch_table(results: list["BatchResult"]) -> str:
+    """Formate le récapitulatif d'un backtest sur un univers entier.
+
+    Args:
+        results: Sortie de `src.engine.batch.run_batch`, une ligne par ticker.
+
+    Returns:
+        Tableau multi-lignes, prêt à être affiché en console.
+    """
+
+    def _pct_or_error(value: float, verdict: str) -> str:
+        if verdict == "ERREUR":
+            return "n/a"
+        return "n/a" if math.isnan(value) else f"{value:.2%}"
+
+    formatted_rows = [
+        (
+            r.ticker,
+            r.name,
+            _pct_or_error(r.strategy_cagr_oos, r.verdict),
+            _pct_or_error(r.benchmark_cagr_oos, r.verdict),
+            _pct_or_error(r.delta, r.verdict),
+            _pct_or_error(r.friction_pct_oos, r.verdict),
+            r.verdict,
+        )
+        for r in results
+    ]
+    return _render_table(_BATCH_HEADERS, formatted_rows)
+
+
+def export_batch_csv(results: list["BatchResult"], path: str | Path) -> None:
+    """Exporte le récapitulatif de backtest sur univers en CSV (valeurs brutes).
+
+    Args:
+        results: Sortie de `src.engine.batch.run_batch`.
+        path: Chemin du fichier CSV de sortie.
+    """
+    df = pd.DataFrame(
+        [
+            {
+                "ticker": r.ticker,
+                "name": r.name,
+                "strategy_cagr_oos": r.strategy_cagr_oos,
+                "benchmark_cagr_oos": r.benchmark_cagr_oos,
+                "delta": r.delta,
+                "friction_pct_oos": r.friction_pct_oos,
+                "verdict": r.verdict,
+                "error": r.error,
+            }
+            for r in results
         ]
-        return " | ".join(aligned)
-
-    lines = [_render(_HEADERS), "-+-".join("-" * w for w in widths)]
-    lines.extend(_render(row) for row in formatted_rows)
-    return "\n".join(lines)
+    )
+    df.to_csv(path, index=False)
 
 
 def export_comparison_csv(rows: list[ComparisonRow], path: str | Path) -> None:

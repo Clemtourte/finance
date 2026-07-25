@@ -6,8 +6,14 @@ import math
 
 import pandas as pd
 
+from src.engine.batch import BatchResult
 from src.metrics.comparison import ComparisonRow
-from src.reporting.table import export_comparison_csv, format_comparison_table
+from src.reporting.table import (
+    export_batch_csv,
+    export_comparison_csv,
+    format_batch_table,
+    format_comparison_table,
+)
 
 
 def _sample_rows() -> list[ComparisonRow]:
@@ -76,3 +82,59 @@ def test_export_comparison_csv_roundtrip(tmp_path):
     assert df.loc[df["metric"] == "cagr", "strategy"].item() == 0.08
     assert df.loc[df["metric"] == "num_trades", "strategy"].item() == 12
     assert math.isnan(df.loc[df["metric"] == "win_rate", "strategy"].item())
+
+
+def _sample_batch_results() -> list[BatchResult]:
+    return [
+        BatchResult(
+            ticker="AI.PA", name="Air Liquide", strategy_cagr_oos=0.05, benchmark_cagr_oos=0.03,
+            delta=0.02, friction_pct_oos=0.01, verdict="SURVIT",
+        ),
+        BatchResult(
+            ticker="MC.PA", name="LVMH", strategy_cagr_oos=-0.02, benchmark_cagr_oos=0.08,
+            delta=-0.10, friction_pct_oos=0.15, verdict="REJETÉ",
+        ),
+        BatchResult(
+            ticker="XX.PA", name="Inconnu", strategy_cagr_oos=float("nan"),
+            benchmark_cagr_oos=float("nan"), delta=float("nan"), friction_pct_oos=float("nan"),
+            verdict="ERREUR", error="Aucune donnée pour XX.PA",
+        ),
+    ]
+
+
+def test_format_batch_table_contains_all_tickers_and_verdicts():
+    table = format_batch_table(_sample_batch_results())
+    assert "AI.PA" in table
+    assert "SURVIT" in table
+    assert "MC.PA" in table
+    assert "REJETÉ" in table
+    assert "XX.PA" in table
+    assert "ERREUR" in table
+
+
+def test_format_batch_table_formats_percentages():
+    table = format_batch_table(_sample_batch_results())
+    assert "5.00%" in table  # strategy_cagr_oos de AI.PA
+    assert "-10.00%" in table  # delta de MC.PA
+
+
+def test_format_batch_table_shows_na_for_error_rows():
+    table = format_batch_table(_sample_batch_results())
+    lines = [line for line in table.splitlines() if "XX.PA" in line]
+    assert len(lines) == 1
+    assert "n/a" in lines[0]
+    assert "nan" not in lines[0]
+
+
+def test_export_batch_csv_roundtrip(tmp_path):
+    results = _sample_batch_results()
+    out_path = tmp_path / "batch.csv"
+    export_batch_csv(results, out_path)
+
+    df = pd.read_csv(out_path)
+    assert list(df.columns) == [
+        "ticker", "name", "strategy_cagr_oos", "benchmark_cagr_oos", "delta",
+        "friction_pct_oos", "verdict", "error",
+    ]
+    assert df.loc[df["ticker"] == "AI.PA", "verdict"].item() == "SURVIT"
+    assert df.loc[df["ticker"] == "XX.PA", "error"].item() == "Aucune donnée pour XX.PA"

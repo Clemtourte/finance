@@ -1,4 +1,4 @@
-.PHONY: install test ingest backtest clean
+.PHONY: install test ingest backtest batch clean
 
 install:
 	uv sync
@@ -12,6 +12,10 @@ ingest:
 # Exemple : make backtest TICKER=AI.PA SPLIT=2020-01-01
 backtest:
 	uv run python -m src.engine.cli --ticker $(TICKER) --split-date $(SPLIT)
+
+# Exemple : make batch UNIVERSE=config/universe_cac40.yaml SPLIT=2020-01-01
+batch:
+	uv run python -m src.engine.batch --universe-file $(UNIVERSE) --split-date $(SPLIT)
 
 clean:
 	rm -rf .pytest_cache data/cache data/*.duckdb

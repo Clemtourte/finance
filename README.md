@@ -18,9 +18,12 @@ Couches implémentées à ce stade :
   (apport programmé) via un moteur dédié minimal (pas via `Strategy`,
   voir plus bas).
 - **`src/engine/`** — moteur de backtest (`vectorbt`), exécution J+1,
-  coûts de transaction obligatoires.
-- **`src/metrics/`** — métriques de performance, stratégie vs buy & hold.
-- **`src/reporting/`** — tableau de comparaison (console + CSV).
+  coûts de transaction obligatoires, rééquilibrage par fréquence, runner
+  batch sur un univers entier.
+- **`src/metrics/`** — métriques de performance, friction, stratégie vs
+  buy & hold, in-sample/out-of-sample.
+- **`src/reporting/`** — tableaux de comparaison et récapitulatif batch
+  (console + CSV).
 
 Pas encore implémenté : optimisation/balayage de paramètres, walk-forward,
 multi-actifs, stratégies short/à levier.
@@ -160,6 +163,28 @@ n'a alors pas de sens.
 Le CLI résout `ttf`/`spread_pct` du ticker demandé depuis
 `config/universe_cac40.yaml` (ou `--universe-file`) ; un ticker absent de
 ce fichier retombe sur `ttf=False`/`spread_pct=0.0` avec un avertissement.
+
+## Backtest sur tout un univers (batch)
+
+`src/engine/batch.py` lance la même stratégie sur tous les tickers d'un
+fichier d'univers et produit un récapitulatif, une ligne par ticker :
+
+```bash
+make batch UNIVERSE=config/universe_cac40.yaml SPLIT=2020-01-01
+# équivalent :
+uv run python -m src.engine.batch --universe-file config/universe_cac40.yaml --split-date 2020-01-01
+```
+
+Comme le CLI mono-ticker, `--split-date` est obligatoire (pas de
+`--no-split` ici : le verdict n'a de sens que sur l'out-of-sample). Pour
+chaque ticker : CAGR net de la stratégie et du buy & hold sur
+l'out-of-sample, écart, friction en % du gain brut, et un verdict —
+**`SURVIT`** si la stratégie bat le buy & hold net de coûts sur
+l'out-of-sample, **`REJETÉ`** sinon (y compris quand la comparaison est
+indéfinie : posture prudente, cohérente avec l'objectif de falsification
+du projet). Un ticker non encore ingéré (ou dont le backtest échoue pour
+toute autre raison) est reporté **`ERREUR`** sans interrompre le run —
+utile pour lancer le batch avant d'avoir ingéré tout l'univers.
 
 ## Installation
 
@@ -348,10 +373,14 @@ attendues des tests de moteur et de métriques sont calculées à la main
 ```
 config/
   data.yaml                    # période, chemins, seuils de validation
-  universe_cac40.yaml          # univers de tickers (CAC 40)
-  backtest.yaml                # capital initial, coûts de transaction, annualisation
+  universe_cac40.yaml          # univers de tickers (CAC 40) + ttf/spread_pct
+  universe_etf_pea.yaml        # univers d'ETF PEA (CW8/EWLD, PSP5, ETZ)
+  backtest.yaml                # capital, coûts par paliers, TTF, glissement, rééquilibrage
   strategies/
-    sma_crossover.yaml         # paramètres de la stratégie de référence
+    sma_crossover.yaml         # référence
+    momentum_12_1.yaml
+    rebalance_bandes.yaml
+    dca.yaml
 src/
   data/
     schema.py                  # colonnes/dtypes OHLCV canoniques + convention anti-look-ahead
@@ -360,7 +389,7 @@ src/
     cache.py                   # cache Parquet par ticker, calcul du delta manquant
     validation.py              # détection de trous / outliers / splits non ajustés
     duckdb_loader.py           # chargement (idempotent) + lecture (read_ohlcv) DuckDB
-    config.py                  # chargement typé de config/data.yaml
+    config.py                  # chargement typé de config/data.yaml (TickerInfo : ttf, spread_pct)
     ingest.py                  # orchestration + CLI (`python -m src.data.ingest`)
   indicators/
     trend.py                   # sma, ema
@@ -368,24 +397,30 @@ src/
     volatility.py              # atr, bollinger_bands
   strategies/
     base.py                    # interface Strategy
-    sma_crossover.py           # stratégie de référence (croisement SMA)
+    sma_crossover.py           # référence (croisement SMA)
+    momentum_12_1.py           # long si rendement 12 mois hors dernier mois > 0
+    rebalance_bandes.py        # cible 100% investi, écrêtage par bande de dérive
+    dca.py                     # apport programmé : moteur dédié (pas une Strategy)
   engine/
     config.py                  # chargement typé de config/backtest.yaml
-    backtest.py                # exécution J+1, coûts obligatoires, buy & hold de référence
-    cli.py                     # CLI (`python -m src.engine.cli`)
+    costs.py                   # courtage par paliers, TTF, spread -> tableaux fees/vectorbt
+    backtest.py                # exécution J+1, rééquilibrage, buy & hold de référence
+    cli.py                     # CLI mono-ticker (`python -m src.engine.cli`), IS/OOS obligatoire
+    batch.py                   # CLI univers entier (`python -m src.engine.batch`), verdict SURVIT/REJETÉ
   metrics/
-    performance.py             # CAGR, vol, Sharpe, Sortino, drawdown, win rate, profit factor, turnover
+    performance.py             # CAGR, vol, Sharpe, Sortino, drawdown, turnover (annualisé), split IS/OOS
+    friction.py                 # reconstruction friction courtage/TTF/spread depuis le journal de trades
     comparison.py               # comparaison stratégie vs buy & hold, métrique par métrique
   reporting/
-    table.py                   # tableau console + export CSV
+    table.py                   # tableau de comparaison + récapitulatif batch (console + CSV)
 tests/
   test_cache.py, test_validation.py, test_config.py, test_ingest.py
   test_indicators.py           # dont le test de non-look-ahead (le plus important)
-  test_strategies.py
-  test_engine.py               # coûts, décalage d'exécution, rendement connu
-  test_metrics.py
-  test_reporting.py
-  test_cli.py
+  test_strategies.py, test_momentum_12_1.py, test_rebalance_bandes.py, test_dca.py
+  test_costs.py                # paliers de courtage, TTF, spread (fonctions pures)
+  test_engine.py               # coûts, décalage d'exécution, rendement connu, rééquilibrage
+  test_metrics.py, test_friction.py
+  test_reporting.py, test_cli.py, test_batch.py
 ```
 
 ## Pourquoi Python 3.12 (et pas 3.11 ou plus récent) ?
