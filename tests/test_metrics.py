@@ -17,10 +17,12 @@ from src.engine.backtest import run_backtest, run_buy_and_hold
 from src.engine.costs import BrokerageTier, CostConfig
 from src.metrics.comparison import compare
 from src.metrics.performance import (
+    annualize_turnover,
     annualized_volatility,
     cagr,
     compute_metrics,
     drawdown_series,
+    friction_pct_of_gross_gain,
     max_drawdown,
     max_drawdown_duration,
     num_trades,
@@ -132,6 +134,29 @@ def test_turnover_nan_when_average_equity_zero():
     assert math.isnan(turnover(traded_notional=1_000.0, average_equity=0.0))
 
 
+def test_annualize_turnover_known_value():
+    # Turnover de 4.0 sur 504 barres (252/an -> 2 ans) -> 2.0/an.
+    assert annualize_turnover(4.0, n_bars=504, periods_per_year=252) == pytest.approx(2.0)
+
+
+def test_annualize_turnover_nan_for_nan_input():
+    assert math.isnan(annualize_turnover(float("nan"), n_bars=252, periods_per_year=252))
+
+
+def test_annualize_turnover_nan_for_zero_bars():
+    assert math.isnan(annualize_turnover(1.0, n_bars=0, periods_per_year=252))
+
+
+def test_friction_pct_of_gross_gain_known_value():
+    # Gain net 900, friction 100 -> gain brut 1000 -> friction = 10%.
+    assert friction_pct_of_gross_gain(friction_eur=100.0, net_gain=900.0) == pytest.approx(0.10)
+
+
+def test_friction_pct_of_gross_gain_nan_when_gross_gain_not_positive():
+    assert math.isnan(friction_pct_of_gross_gain(friction_eur=100.0, net_gain=-200.0))
+    assert math.isnan(friction_pct_of_gross_gain(friction_eur=0.0, net_gain=0.0))
+
+
 # --- compute_metrics : intégration avec vectorbt.Portfolio -------------------
 
 
@@ -147,11 +172,14 @@ def test_compute_metrics_open_position_counts_zero_closed_trades():
     costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.006),), ttf_pct=0.0, base_slippage_pct=0.0005)
     pf = run_buy_and_hold(df, costs, initial_capital=10_000.0)
 
-    result = compute_metrics(pf, periods_per_year=252, risk_free_rate=0.0)
+    result = compute_metrics(
+        pf, df["open"], costs, ttf_eligible=False, spread_pct=0.0, periods_per_year=252, risk_free_rate=0.0
+    )
 
     assert result.num_trades == 0  # position jamais clôturée
     assert math.isnan(result.win_rate)
     assert result.cagr > 0  # prix monte linéairement
+    assert result.friction_eur > 0  # l'entrée a bien payé une friction
 
 
 def test_compute_metrics_closed_trade_counts_one():
@@ -162,7 +190,9 @@ def test_compute_metrics_closed_trade_counts_one():
     costs = CostConfig(brokerage_tiers=(BrokerageTier(max_order_value=None, pct_fee=0.006),), ttf_pct=0.0, base_slippage_pct=0.0005)
     pf = run_backtest(df, target, costs, initial_capital=10_000.0)
 
-    result = compute_metrics(pf, periods_per_year=252, risk_free_rate=0.0)
+    result = compute_metrics(
+        pf, df["open"], costs, ttf_eligible=False, spread_pct=0.0, periods_per_year=252, risk_free_rate=0.0
+    )
 
     assert result.num_trades == 1
     assert result.win_rate == 1.0  # prix monte, trade gagnant
@@ -180,8 +210,14 @@ def test_compare_produces_one_row_per_field_with_correct_delta():
     strategy_pf = run_backtest(df, target, costs, initial_capital=10_000.0)
     benchmark_pf = run_buy_and_hold(df, costs, initial_capital=10_000.0)
 
-    strategy_metrics = compute_metrics(strategy_pf, periods_per_year=252, risk_free_rate=0.0)
-    benchmark_metrics = compute_metrics(benchmark_pf, periods_per_year=252, risk_free_rate=0.0)
+    strategy_metrics = compute_metrics(
+        strategy_pf, df["open"], costs, ttf_eligible=False, spread_pct=0.0,
+        periods_per_year=252, risk_free_rate=0.0,
+    )
+    benchmark_metrics = compute_metrics(
+        benchmark_pf, df["open"], costs, ttf_eligible=False, spread_pct=0.0,
+        periods_per_year=252, risk_free_rate=0.0,
+    )
 
     rows = compare(strategy_metrics, benchmark_metrics)
 
@@ -242,9 +278,17 @@ def test_split_portfolio_metrics_differ_from_combined():
 
     from src.metrics.performance import compute_metrics_from_series
 
-    metrics_is = compute_metrics_from_series(equity_is, trades_is, periods_per_year=252, risk_free_rate=0.0)
-    metrics_oos = compute_metrics_from_series(equity_oos, trades_oos, periods_per_year=252, risk_free_rate=0.0)
-    metrics_full = compute_metrics(pf, periods_per_year=252, risk_free_rate=0.0)
+    metrics_is = compute_metrics_from_series(
+        equity_is, trades_is, df["open"], costs, ttf_eligible=False, spread_pct=0.0,
+        periods_per_year=252, risk_free_rate=0.0,
+    )
+    metrics_oos = compute_metrics_from_series(
+        equity_oos, trades_oos, df["open"], costs, ttf_eligible=False, spread_pct=0.0,
+        periods_per_year=252, risk_free_rate=0.0,
+    )
+    metrics_full = compute_metrics(
+        pf, df["open"], costs, ttf_eligible=False, spread_pct=0.0, periods_per_year=252, risk_free_rate=0.0
+    )
 
     # CAGR se rebase sur le premier point de chaque sous-période -> les
     # trois valeurs doivent être distinctes sur une trajectoire non

@@ -17,6 +17,12 @@ def _sample_rows() -> list[ComparisonRow]:
         ComparisonRow(metric="num_trades", strategy=12, buy_and_hold=0, delta=12),
         ComparisonRow(metric="win_rate", strategy=float("nan"), buy_and_hold=float("nan"), delta=float("nan")),
         ComparisonRow(metric="profit_factor", strategy=float("inf"), buy_and_hold=float("nan"), delta=float("inf")),
+        ComparisonRow(metric="turnover", strategy=2.5, buy_and_hold=0.0, delta=2.5),
+        ComparisonRow(metric="turnover_annualized", strategy=1.25, buy_and_hold=0.0, delta=1.25),
+        ComparisonRow(metric="friction_eur", strategy=123.456, buy_and_hold=1.99, delta=121.466),
+        ComparisonRow(
+            metric="friction_pct_of_gross_gain", strategy=0.15, buy_and_hold=0.002, delta=0.148
+        ),
     ]
 
 
@@ -43,6 +49,14 @@ def test_format_comparison_table_handles_nan_and_inf():
     table = format_comparison_table(_sample_rows())
     assert "n/a" in table
     assert "inf" in table
+
+
+def test_format_comparison_table_formats_turnover_and_friction():
+    table = format_comparison_table(_sample_rows())
+    assert "2.50x" in table  # turnover stratégie
+    assert "1.25x" in table  # turnover_annualized stratégie
+    assert "123.46€" in table  # friction_eur stratégie
+    assert "15.00%" in table  # friction_pct_of_gross_gain stratégie
 
 
 def test_format_comparison_table_has_header_and_separator():

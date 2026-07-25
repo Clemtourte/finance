@@ -45,10 +45,23 @@ def workspace(tmp_path):
     with DuckDBLoader(db_path, "ohlcv_daily") as loader:
         loader.load_ticker("AI.PA", cache.file_path("AI.PA"))
 
+    universe_path = tmp_path / "universe.yaml"
+    universe_path.write_text(
+        """
+tickers:
+  - ticker: AI.PA
+    name: Air Liquide
+    isin: FR0000120073
+    ttf: true
+    spread_pct: 0.0003
+""",
+        encoding="utf-8",
+    )
+
     data_config_path = tmp_path / "data.yaml"
     data_config_path.write_text(
         f"""
-universe_file: {tmp_path / "unused.yaml"}
+universe_file: {universe_path}
 period:
   start_date: "2023-01-01"
   end_date: "today"

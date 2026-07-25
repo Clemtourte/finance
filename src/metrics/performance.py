@@ -16,6 +16,9 @@ from datetime import date
 import pandas as pd
 import vectorbt as vbt
 
+from src.engine.costs import CostConfig
+from src.metrics.friction import compute_friction
+
 
 def periodic_returns(equity: pd.Series) -> pd.Series:
     """Rendements période à période d'une courbe d'équité.
@@ -222,6 +225,46 @@ def turnover(traded_notional: float, average_equity: float) -> float:
     return traded_notional / average_equity
 
 
+def annualize_turnover(turnover_value: float, n_bars: int, periods_per_year: int) -> float:
+    """Annualise un turnover calculé sur une période quelconque.
+
+    Args:
+        turnover_value: Turnover brut sur la période (sortie de `turnover`).
+        n_bars: Nombre de barres de la période.
+        periods_per_year: Nombre de périodes (séances) par an.
+
+    Returns:
+        Turnover ramené à un an (ex. `2.0` = 2x le capital moyen échangé
+        par an). `NaN` si `turnover_value` est `NaN` ou si la période
+        couvre moins d'une barre.
+    """
+    if pd.isna(turnover_value) or n_bars <= 0:
+        return float("nan")
+    years = n_bars / periods_per_year
+    if years <= 0:
+        return float("nan")
+    return turnover_value / years
+
+
+def friction_pct_of_gross_gain(friction_eur: float, net_gain: float) -> float:
+    """Friction cumulée en fraction du gain brut (gain net + friction).
+
+    Args:
+        friction_eur: Friction cumulée (courtage + TTF + glissement), en euros.
+        net_gain: Gain net de la période (`equity[-1] - equity[0]`), déjà
+            net de toute friction.
+
+    Returns:
+        Fraction de la friction dans le gain brut (`friction / (net_gain +
+        friction)`). `NaN` si le gain brut est nul ou négatif (le concept
+        de "part du gain" n'a pas de sens dans ce cas).
+    """
+    gross_gain = net_gain + friction_eur
+    if gross_gain <= 0:
+        return float("nan")
+    return friction_eur / gross_gain
+
+
 @dataclass(frozen=True)
 class MetricsResult:
     """Ensemble de métriques de performance pour un portefeuille."""
@@ -236,11 +279,18 @@ class MetricsResult:
     profit_factor: float
     num_trades: int
     turnover: float
+    turnover_annualized: float
+    friction_eur: float
+    friction_pct_of_gross_gain: float
 
 
 def compute_metrics_from_series(
     equity: pd.Series,
     trades: pd.DataFrame,
+    open_prices: pd.Series,
+    costs: CostConfig,
+    ttf_eligible: bool,
+    spread_pct: float,
     periods_per_year: int,
     risk_free_rate: float,
 ) -> MetricsResult:
@@ -257,17 +307,26 @@ def compute_metrics_from_series(
         equity: Valeur du portefeuille, indexée par date croissante.
         trades: `portfolio.trades.records_readable` (ou un sous-ensemble
             de ses lignes), avec au moins les colonnes `Status`, `PnL`,
-            `Size`, `Avg Entry Price`, `Avg Exit Price`.
+            `Size`, `Avg Entry Price`, `Avg Exit Price`, `Entry Timestamp`,
+            `Exit Timestamp`.
+        open_prices: Prix `open` bruts du backtest d'origine (non
+            tronqués : sert uniquement à retrouver, par timestamp, le
+            prix avant glissement de chaque ordre de `trades`, voir
+            `src.metrics.friction.compute_friction`).
+        costs: Configuration de coûts utilisée pour produire `trades`.
+        ttf_eligible: Éligibilité TTF utilisée pour produire `trades`.
+        spread_pct: Spread du titre utilisé pour produire `trades`.
         periods_per_year: Nombre de périodes (séances) par an.
         risk_free_rate: Taux sans risque annuel (fraction).
 
     Returns:
         `MetricsResult` consolidé. Les métriques basées sur les trades
-        (`win_rate`, `profit_factor`, `num_trades`, `turnover`) ne
-        comptent que les trades clôturés (une position encore ouverte à
-        la fin de la période, comme un buy & hold jamais soldé, est
+        clôturés (`win_rate`, `profit_factor`, `num_trades`, `turnover`)
+        ne comptent que les trades clôturés (une position encore ouverte
+        à la fin de la période, comme un buy & hold jamais soldé, est
         valorisée au marché dans l'équité mais n'est pas comptée comme un
-        trade réalisé).
+        trade réalisé) ; la friction, elle, compte aussi l'entrée d'une
+        position encore ouverte (ce coût a réellement été payé).
     """
     returns = periodic_returns(equity)
 
@@ -281,6 +340,10 @@ def compute_metrics_from_series(
     else:
         traded_notional = 0.0
 
+    turnover_value = turnover(traded_notional, float(equity.mean()))
+    friction = compute_friction(trades, open_prices, costs, ttf_eligible, spread_pct)
+    net_gain = float(equity.iloc[-1] - equity.iloc[0]) if len(equity) else 0.0
+
     return MetricsResult(
         cagr=cagr(equity, periods_per_year),
         annualized_volatility=annualized_volatility(returns, periods_per_year),
@@ -291,12 +354,19 @@ def compute_metrics_from_series(
         win_rate=win_rate(pnl),
         profit_factor=profit_factor(pnl),
         num_trades=num_trades(pnl),
-        turnover=turnover(traded_notional, float(equity.mean())),
+        turnover=turnover_value,
+        turnover_annualized=annualize_turnover(turnover_value, len(equity), periods_per_year),
+        friction_eur=friction.total_eur,
+        friction_pct_of_gross_gain=friction_pct_of_gross_gain(friction.total_eur, net_gain),
     )
 
 
 def compute_metrics(
     portfolio: vbt.Portfolio,
+    open_prices: pd.Series,
+    costs: CostConfig,
+    ttf_eligible: bool,
+    spread_pct: float,
     periods_per_year: int,
     risk_free_rate: float,
 ) -> MetricsResult:
@@ -305,6 +375,11 @@ def compute_metrics(
     Args:
         portfolio: Portefeuille issu de `src.engine.backtest.run_backtest`
             ou `run_buy_and_hold`.
+        open_prices: Prix `open` bruts utilisés pour ce backtest (voir
+            `compute_metrics_from_series`).
+        costs: Configuration de coûts utilisée pour ce backtest.
+        ttf_eligible: Éligibilité TTF utilisée pour ce backtest.
+        spread_pct: Spread du titre utilisé pour ce backtest.
         periods_per_year: Nombre de périodes (séances) par an.
         risk_free_rate: Taux sans risque annuel (fraction).
 
@@ -312,7 +387,14 @@ def compute_metrics(
         `MetricsResult` consolidé (voir `compute_metrics_from_series`).
     """
     return compute_metrics_from_series(
-        portfolio.value(), portfolio.trades.records_readable, periods_per_year, risk_free_rate
+        portfolio.value(),
+        portfolio.trades.records_readable,
+        open_prices,
+        costs,
+        ttf_eligible,
+        spread_pct,
+        periods_per_year,
+        risk_free_rate,
     )
 
 

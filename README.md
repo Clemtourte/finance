@@ -137,6 +137,30 @@ Pour tourner sans découpage (déconseillé hors exploration rapide), passer
 `--no-split` explicitement : la sortie l'indique alors clairement en tête
 de rapport.
 
+## Friction (courtage + TTF + spread)
+
+Le CLI affiche, en tête de rapport, la friction cumulée de la stratégie
+sur toute la période (`src.metrics.friction.compute_friction`) et le
+turnover annualisé (`turnover_annualized`) ; les deux sont aussi ajoutés
+au tableau de comparaison stratégie vs buy & hold (`friction_eur`,
+`friction_pct_of_gross_gain`, `turnover_annualized`).
+
+Aucune re-simulation n'est nécessaire : chaque euro de friction se
+déduit exactement des colonnes du journal de trades `vectorbt` déjà
+produit (`Size`, `Avg Entry/Exit Price`, `Entry/Exit Fees`) combinées à
+la configuration de coûts d'origine — voir la docstring de
+`compute_friction` pour le détail de la reconstruction (comment le
+palier de courtage exact et la part TTF/courtage se retrouvent sans état
+caché). Une position encore ouverte (buy & hold jamais soldé) a bien payé
+sa friction d'entrée, comptée ; aucune friction de sortie fictive ne lui
+est imputée. `friction_pct_of_gross_gain` vaut `n/a` quand le gain brut
+(gain net + friction) n'est pas positif — le concept de "part du gain"
+n'a alors pas de sens.
+
+Le CLI résout `ttf`/`spread_pct` du ticker demandé depuis
+`config/universe_cac40.yaml` (ou `--universe-file`) ; un ticker absent de
+ce fichier retombe sur `ttf=False`/`spread_pct=0.0` avec un avertissement.
+
 ## Installation
 
 Prérequis : [uv](https://docs.astral.sh/uv/). `uv sync` télécharge

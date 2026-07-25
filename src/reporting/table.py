@@ -10,11 +10,17 @@ import pandas as pd
 from src.metrics.comparison import ComparisonRow
 
 #: Métriques affichées en pourcentage (ex. `12.34%`).
-_PERCENT_METRICS = frozenset({"cagr", "annualized_volatility", "max_drawdown", "win_rate"})
+_PERCENT_METRICS = frozenset(
+    {"cagr", "annualized_volatility", "max_drawdown", "win_rate", "friction_pct_of_gross_gain"}
+)
 #: Métriques affichées comme un ratio à 2 décimales.
 _RATIO_METRICS = frozenset({"sharpe_ratio", "sortino_ratio", "profit_factor"})
 #: Métriques entières.
 _INT_METRICS = frozenset({"num_trades", "max_drawdown_duration_bars"})
+#: Métriques de turnover, affichées comme un multiple ("x").
+_TURNOVER_METRICS = frozenset({"turnover", "turnover_annualized"})
+#: Métriques monétaires, affichées en euros.
+_EUR_METRICS = frozenset({"friction_eur"})
 
 _HEADERS = ("Métrique", "Stratégie", "Buy & Hold", "Écart")
 
@@ -25,8 +31,10 @@ def _format_value(metric: str, value: float) -> str:
         return "n/a"
     if metric in _PERCENT_METRICS:
         return f"{value:.2%}"
-    if metric == "turnover":
+    if metric in _TURNOVER_METRICS:
         return f"{value:.2f}x"
+    if metric in _EUR_METRICS:
+        return f"{value:,.2f}€"
     if metric in _RATIO_METRICS:
         return f"{value:.2f}"
     if metric in _INT_METRICS:

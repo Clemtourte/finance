@@ -14,7 +14,7 @@ import argparse
 from datetime import date
 from pathlib import Path
 
-from src.data.config import load_data_config
+from src.data.config import load_data_config, load_universe
 from src.data.duckdb_loader import read_ohlcv
 from src.engine.backtest import run_backtest, run_buy_and_hold
 from src.engine.config import load_backtest_config
@@ -62,6 +62,12 @@ def main() -> None:
         help="Autorise à tourner sans --split-date, sur la période complète "
         "(la sortie le signale explicitement)",
     )
+    parser.add_argument(
+        "--universe-file",
+        default=None,
+        help="Fichier d'univers pour l'éligibilité TTF/spread du ticker "
+        "(défaut : celui de --data-config)",
+    )
     args = parser.parse_args()
 
     if args.split_date is None and not args.no_split:
@@ -75,10 +81,22 @@ def main() -> None:
     strategy = load_sma_crossover_strategy(args.strategy_config)
     rebalance_freq = args.rebalance_freq or backtest_config.rebalance_freq
 
+    universe_file = args.universe_file or data_config.universe_file
+    universe = load_universe(universe_file)
+    ticker_info = next((t for t in universe if t.ticker == args.ticker), None)
+    if ticker_info is None:
+        print(f"/!\\ {args.ticker} absent de {universe_file} : ttf=False, spread_pct=0.0 par défaut")
+        ttf_eligible, spread_pct = False, 0.0
+    else:
+        ttf_eligible, spread_pct = ticker_info.ttf, ticker_info.spread_pct
+
     start = args.start or data_config.start_date
     end = args.end or data_config.end_date
 
     df = read_ohlcv(data_config.duckdb_path, data_config.duckdb_table, args.ticker, start=start, end=end)
+
+    periods_per_year = backtest_config.trading_days_per_year
+    risk_free_rate = backtest_config.risk_free_rate
 
     target_position = strategy.generate_signals(df)
     strategy_pf = run_backtest(
@@ -86,9 +104,14 @@ def main() -> None:
         target_position,
         backtest_config.costs,
         backtest_config.initial_capital,
+        ttf_eligible=ttf_eligible,
+        spread_pct=spread_pct,
         rebalance_freq=rebalance_freq,
     )
-    benchmark_pf = run_buy_and_hold(df, backtest_config.costs, backtest_config.initial_capital)
+    benchmark_pf = run_buy_and_hold(
+        df, backtest_config.costs, backtest_config.initial_capital,
+        ttf_eligible=ttf_eligible, spread_pct=spread_pct,
+    )
 
     tiers_desc = ", ".join(
         f"<= {t.max_order_value:.0f}€: {t.fixed_fee:.2f}€"
@@ -101,9 +124,21 @@ def main() -> None:
         f"| rééquilibrage: {rebalance_freq}"
     )
     print(
-        f"Coûts : courtage [{tiers_desc}] + TTF {backtest_config.costs.ttf_pct:.2%} (si éligible) + "
-        f"glissement de base {backtest_config.costs.base_slippage_pct:.2%} | capital initial : "
-        f"{backtest_config.initial_capital:,.0f}"
+        f"Coûts : courtage [{tiers_desc}] + TTF {backtest_config.costs.ttf_pct:.2%} "
+        f"({'éligible' if ttf_eligible else 'non éligible'}) + glissement "
+        f"{backtest_config.costs.base_slippage_pct:.2%} de base + {spread_pct:.2%} de spread | "
+        f"capital initial : {backtest_config.initial_capital:,.0f}"
+    )
+
+    full_strategy_metrics = compute_metrics(
+        strategy_pf, df["open"], backtest_config.costs, ttf_eligible, spread_pct,
+        periods_per_year, risk_free_rate,
+    )
+    print(
+        f"Friction totale (stratégie, période complète) : "
+        f"{full_strategy_metrics.friction_eur:,.2f}€ "
+        f"({full_strategy_metrics.friction_pct_of_gross_gain:.2%} du gain brut) | "
+        f"Turnover annualisé : {full_strategy_metrics.turnover_annualized:.2f}x"
     )
 
     if args.no_split:
@@ -112,13 +147,11 @@ def main() -> None:
             "métriques ci-dessous couvrent toute la période, sans contrôle de "
             "surapprentissage.\n"
         )
-        strategy_metrics = compute_metrics(
-            strategy_pf, backtest_config.trading_days_per_year, backtest_config.risk_free_rate
-        )
         benchmark_metrics = compute_metrics(
-            benchmark_pf, backtest_config.trading_days_per_year, backtest_config.risk_free_rate
+            benchmark_pf, df["open"], backtest_config.costs, ttf_eligible, spread_pct,
+            periods_per_year, risk_free_rate,
         )
-        rows = compare(strategy_metrics, benchmark_metrics)
+        rows = compare(full_strategy_metrics, benchmark_metrics)
         print(format_comparison_table(rows))
 
         if args.output_csv:
@@ -133,20 +166,23 @@ def main() -> None:
             split_portfolio_by_date(benchmark_pf, split_date)
         )
 
-        periods_per_year = backtest_config.trading_days_per_year
-        risk_free_rate = backtest_config.risk_free_rate
+        costs = backtest_config.costs
 
         strategy_metrics_is = compute_metrics_from_series(
-            strategy_equity_is, strategy_trades_is, periods_per_year, risk_free_rate
+            strategy_equity_is, strategy_trades_is, df["open"], costs, ttf_eligible, spread_pct,
+            periods_per_year, risk_free_rate,
         )
         benchmark_metrics_is = compute_metrics_from_series(
-            benchmark_equity_is, benchmark_trades_is, periods_per_year, risk_free_rate
+            benchmark_equity_is, benchmark_trades_is, df["open"], costs, ttf_eligible, spread_pct,
+            periods_per_year, risk_free_rate,
         )
         strategy_metrics_oos = compute_metrics_from_series(
-            strategy_equity_oos, strategy_trades_oos, periods_per_year, risk_free_rate
+            strategy_equity_oos, strategy_trades_oos, df["open"], costs, ttf_eligible, spread_pct,
+            periods_per_year, risk_free_rate,
         )
         benchmark_metrics_oos = compute_metrics_from_series(
-            benchmark_equity_oos, benchmark_trades_oos, periods_per_year, risk_free_rate
+            benchmark_equity_oos, benchmark_trades_oos, df["open"], costs, ttf_eligible, spread_pct,
+            periods_per_year, risk_free_rate,
         )
 
         rows_is = compare(strategy_metrics_is, benchmark_metrics_is)
