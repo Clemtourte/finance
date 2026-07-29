@@ -288,6 +288,40 @@ supprimer (les logs restent inchangés) :
 uv run python -m src.data.ingest --config config/data.yaml --quiet
 ```
 
+Ce rapport ne contient que les anomalies **nouvelles** : `config/known_
+anomalies.yaml` (voir `src/data/baseline.py`) tient la ligne de base des
+anomalies déjà examinées et jugées authentiques (fermetures de marché,
+volatilité réelle d'une small cap, etc.), identifiées par le triplet
+`(ticker, kind, date)` — jamais par leurs valeurs (`adj_close`, rendement,
+ratios), qui peuvent changer d'une ingestion à l'autre (un détachement de
+dividende recalcule tout l'historique `adj_close` antérieur) sans que
+l'anomalie elle-même soit nouvelle. Une anomalie à une date absente de la
+ligne de base remonte toujours, même sur un ticker déjà largement
+couvert. Sans ce filtrage, un job automatisé ne pourrait jamais alerter
+sur une vraie nouveauté : l'état normal du pipeline est déjà bruyant
+(volatilité small cap, fermetures calendaires), et une vraie radiation
+produirait exactement le même type de message.
+
+Pour initialiser la ligne de base depuis l'état courant (à éditer ensuite
+à la main : chaque entrée générée porte `note: "À justifier"`) :
+
+```bash
+uv run python -m src.data.ingest --config config/data.yaml --init-known-anomalies
+# --force pour écraser un fichier existant (sinon refusé, pour ne pas
+# perdre des justifications déjà écrites à la main)
+```
+
+`--known-anomalies` change le chemin du fichier (défaut
+`config/known_anomalies.yaml`). Le CLI se termine avec un code de sortie
+distinguant les deux situations qu'un job automatisé ne doit jamais
+confondre :
+
+- **`0`** : ingestion réussie, aucune anomalie nouvelle.
+- **`1`** : ingestion réussie, mais au moins une anomalie nouvelle
+  détectée — il y a quelque chose à lire, rien n'est cassé.
+- **`2`** : échec technique (exception pendant l'ingestion, ligne de base
+  illisible, écriture impossible) — le pipeline lui-même est cassé.
+
 ### 3. Interroger l'entrepôt
 
 ```python

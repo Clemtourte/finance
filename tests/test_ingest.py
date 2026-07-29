@@ -217,6 +217,9 @@ validation:
         "data_config": data_config_path,
         "override_universe": override_universe_path,
         "db_path": db_path,
+        # Chemin volontairement absent : les tests ne doivent jamais lire/écrire
+        # le vrai config/known_anomalies.yaml du dépôt.
+        "known_anomalies": tmp_path / "known_anomalies.yaml",
     }
 
 
@@ -233,11 +236,15 @@ def test_main_universe_file_argument_overrides_config_default(ingest_cli_workspa
         str(ingest_cli_workspace["data_config"]),
         "--universe-file",
         str(ingest_cli_workspace["override_universe"]),
+        "--known-anomalies",
+        str(ingest_cli_workspace["known_anomalies"]),
     ]
     monkeypatch.setattr(sys, "argv", argv)
 
-    main()
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
+    assert exc_info.value.code == 0
     assert _tickers_in_duckdb(ingest_cli_workspace["db_path"]) == {"AI.PA"}
 
 
@@ -247,9 +254,170 @@ def test_main_without_universe_file_argument_uses_config_default(ingest_cli_work
         "prog",
         "--config",
         str(ingest_cli_workspace["data_config"]),
+        "--known-anomalies",
+        str(ingest_cli_workspace["known_anomalies"]),
     ]
     monkeypatch.setattr(sys, "argv", argv)
 
-    main()
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
+    assert exc_info.value.code == 0
     assert _tickers_in_duckdb(ingest_cli_workspace["db_path"]) == {"MC.PA"}
+
+
+# --- codes de sortie : ligne de base des anomalies -----------------------------
+
+
+class _AnomalousFakeYFinanceProvider(_FakeYFinanceProvider):
+    """Double de `YFinanceProvider` injectant un choc de prix déterministe.
+
+    Multiplie le prix par 2,2 à partir de la 6e séance de la plage
+    demandée (décalage permanent, pas un aller-retour) pour déclencher
+    `detect_outliers` une seule fois, de façon reproductible ; 2,2 ne
+    correspond à aucun ratio de split typique, donc `detect_unadjusted_
+    splits` ne se déclenche pas en plus.
+    """
+
+    _SHOCK_INDEX = 5
+    _SHOCK_MULTIPLIER = 2.2
+
+    def get_ohlcv(self, ticker: str, start: date, end: date) -> pd.DataFrame:
+        df = super().get_ohlcv(ticker, start, end)
+        if len(df) > self._SHOCK_INDEX:
+            df = df.copy()
+            mask = df.index >= df.index[self._SHOCK_INDEX]
+            df.loc[mask, ["close", "adj_close"]] *= self._SHOCK_MULTIPLIER
+        return df
+
+
+class _RaisingFakeYFinanceProvider(_FakeYFinanceProvider):
+    """Double de `YFinanceProvider` simulant un échec réseau non rattrapé."""
+
+    def get_ohlcv(self, ticker: str, start: date, end: date) -> pd.DataFrame:
+        raise RuntimeError("panne réseau simulée")
+
+
+def _anomaly_date(start: date, end: date) -> date:
+    return list(pd.bdate_range(start=start, end=end).date)[_AnomalousFakeYFinanceProvider._SHOCK_INDEX]
+
+
+def test_main_exits_0_when_all_anomalies_are_in_the_baseline(ingest_cli_workspace, monkeypatch):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _AnomalousFakeYFinanceProvider)
+
+    anomaly_date = _anomaly_date(date(2024, 1, 1), date(2024, 1, 10))
+    known_path = ingest_cli_workspace["known_anomalies"]
+    known_path.write_text(
+        f"""
+anomalies:
+  - ticker: MC.PA
+    kind: outlier
+    date: {anomaly_date.isoformat()}
+    note: "Connue et acceptée."
+""",
+        encoding="utf-8",
+    )
+
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+        "--known-anomalies",
+        str(known_path),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+
+
+def test_main_exits_1_when_a_new_anomaly_is_not_in_the_baseline(ingest_cli_workspace, monkeypatch):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _AnomalousFakeYFinanceProvider)
+
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+        "--known-anomalies",
+        str(ingest_cli_workspace["known_anomalies"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+
+
+def test_main_exits_2_when_ingestion_raises(ingest_cli_workspace, monkeypatch, caplog):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _RaisingFakeYFinanceProvider)
+
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+        "--known-anomalies",
+        str(ingest_cli_workspace["known_anomalies"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 2
+
+
+# --- message d'initialisation : reprend les arguments effectivement passés ----
+
+
+def test_main_init_suggestion_includes_the_universe_file_argument_passed(
+    ingest_cli_workspace, monkeypatch, capsys
+):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _FakeYFinanceProvider)
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+        "--universe-file",
+        str(ingest_cli_workspace["override_universe"]),
+        "--known-anomalies",
+        str(ingest_cli_workspace["known_anomalies"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit):
+        main()
+
+    captured = capsys.readouterr()
+    assert f"--universe-file {ingest_cli_workspace['override_universe']}" in captured.out
+
+
+# --- --init-known-anomalies sans --force sur un fichier existant -------------
+
+
+def test_main_init_known_anomalies_refuses_overwrite_without_traceback(
+    ingest_cli_workspace, monkeypatch, caplog
+):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _FakeYFinanceProvider)
+    known_path = ingest_cli_workspace["known_anomalies"]
+    known_path.write_text("anomalies: []\n", encoding="utf-8")
+    original_content = known_path.read_text(encoding="utf-8")
+
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+        "--known-anomalies",
+        str(known_path),
+        "--init-known-anomalies",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 2
+    assert known_path.read_text(encoding="utf-8") == original_content
+    assert all(record.exc_info is None for record in caplog.records)

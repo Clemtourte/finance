@@ -44,11 +44,19 @@ def _format_unadjusted_splits(splits: pd.DataFrame) -> list[str]:
     return lines
 
 
-def format_validation_report(report: ValidationReport) -> str:
+def format_validation_report(report: ValidationReport, *, filtered: bool = False) -> str:
     """Rendu détaillé du rapport de validation d'un ticker.
 
     Args:
-        report: Rapport produit par `src.data.validation.validate_ohlcv`.
+        report: Rapport produit par `src.data.validation.validate_ohlcv`,
+            éventuellement passé par `src.data.baseline.filter_known`.
+        filtered: `True` si `report` a déjà été passé au filtre de la
+            ligne de base des anomalies connues (`src.data.baseline`) : le
+            vocabulaire devient "nouvelle" plutôt que "détectée", pour ne
+            pas laisser croire qu'aucune anomalie n'a jamais existé sur ce
+            ticker alors qu'elle a seulement déjà été examinée et
+            acceptée. `False` (défaut) conserve le vocabulaire d'un
+            rapport brut, non filtré.
 
     Returns:
         Texte multi-lignes détaillant chaque anomalie (trous, valeurs
@@ -57,7 +65,8 @@ def format_validation_report(report: ValidationReport) -> str:
         (jamais de chaîne vide).
     """
     if not report.has_issues:
-        return f"{report.ticker}: aucune anomalie détectée"
+        anomaly_word = "nouvelle" if filtered else "détectée"
+        return f"{report.ticker}: aucune anomalie {anomaly_word}"
 
     lines = [f"{report.ticker} :"]
     if not report.gaps.empty:
@@ -69,12 +78,17 @@ def format_validation_report(report: ValidationReport) -> str:
     return "\n".join(lines)
 
 
-def format_validation_summary(reports: dict[str, ValidationReport]) -> str:
+def format_validation_summary(reports: dict[str, ValidationReport], *, filtered: bool = False) -> str:
     """Synthèse multi-tickers des rapports de validation.
 
     Args:
         reports: `ticker -> ValidationReport`, dans l'ordre d'affichage
             souhaité (ex. sortie de `src.data.ingest.run_ingestion`).
+        filtered: `True` si `reports` a déjà été passé au filtre de la
+            ligne de base des anomalies connues (`src.data.baseline`) :
+            les tickers propres et le total qualifient les anomalies
+            restantes de "nouvelles" plutôt que "détectées". Transmis tel
+            quel à `format_validation_report`.
 
     Returns:
         Texte multi-lignes : une ligne par ticker sans anomalie, le
@@ -82,13 +96,21 @@ def format_validation_summary(reports: dict[str, ValidationReport]) -> str:
         par un total (nombre de tickers, nombre d'anomalies par
         catégorie). Jamais de chaîne vide, même si `reports` est vide.
     """
-    blocks = [format_validation_report(report) for report in reports.values()]
+    blocks = [format_validation_report(report, filtered=filtered) for report in reports.values()]
 
     total_gaps = sum(len(r.gaps) for r in reports.values())
     total_outliers = sum(len(r.outliers) for r in reports.values())
     total_splits = sum(len(r.unadjusted_splits) for r in reports.values())
-    blocks.append(
-        f"Total : {len(reports)} ticker(s) | {total_gaps} trou(s), "
-        f"{total_outliers} valeur(s) aberrante(s), {total_splits} split(s) suspect(s)"
-    )
+    if filtered:
+        total_line = (
+            f"Total : {len(reports)} ticker(s) | {total_gaps} trou(s) nouveau(x), "
+            f"{total_outliers} valeur(s) aberrante(s) nouvelle(s), "
+            f"{total_splits} split(s) suspect(s) nouveau(x)"
+        )
+    else:
+        total_line = (
+            f"Total : {len(reports)} ticker(s) | {total_gaps} trou(s), "
+            f"{total_outliers} valeur(s) aberrante(s), {total_splits} split(s) suspect(s)"
+        )
+    blocks.append(total_line)
     return "\n\n".join(blocks)

@@ -91,3 +91,42 @@ def test_format_validation_summary_mixes_clean_and_flagged_tickers_with_correct_
     assert "1 trou(s)" in result
     assert "1 valeur(s) aberrante(s)" in result
     assert "0 split(s) suspect(s)" in result
+
+
+# --- filtered=True : vocabulaire "nouvelle" (ligne de base active) ------------
+
+
+def test_format_validation_report_empty_with_filtered_says_nouvelle_not_detectee():
+    result = format_validation_report(_empty_report("ETZ.PA"), filtered=True)
+    assert result != ""
+    assert len(result.splitlines()) == 1
+    assert "ETZ.PA" in result
+    assert "aucune anomalie nouvelle" in result
+    assert "détectée" not in result
+
+
+def test_format_validation_report_empty_without_filtered_still_says_detectee():
+    result = format_validation_report(_empty_report("ETZ.PA"))
+    assert "aucune anomalie détectée" in result
+    assert "nouvelle" not in result
+
+
+def test_format_validation_summary_filtered_qualifies_totals_as_nouvelles():
+    reports = {
+        "ETZ.PA": _empty_report("ETZ.PA"),
+        "ALKAL.PA": _report_with_outlier("ALKAL.PA"),
+    }
+    result = format_validation_summary(reports, filtered=True)
+
+    assert "ETZ.PA: aucune anomalie nouvelle" in result
+    assert "trou(s) nouveau(x)" in result
+    assert "valeur(s) aberrante(s) nouvelle(s)" in result
+    assert "split(s) suspect(s) nouveau(x)" in result
+
+
+def test_format_validation_summary_without_filtered_keeps_original_wording():
+    reports = {"ETZ.PA": _empty_report("ETZ.PA")}
+    result = format_validation_summary(reports)
+
+    assert "ETZ.PA: aucune anomalie détectée" in result
+    assert "nouveau" not in result
