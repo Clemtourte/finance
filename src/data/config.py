@@ -24,8 +24,12 @@ class TickerInfo:
         isin: Code ISIN.
         ttf: `True` si le titre est soumis à la taxe française sur les
             transactions financières (grandes capitalisations françaises).
-        spread_pct: Spread bid/ask propre au titre (fraction), utilisé
-            comme glissement additionnel par le moteur de backtest.
+        spread_pct: DEMI-spread propre au titre (fraction) : le coût
+            supporté d'un seul côté de l'aller-retour. Le moteur de coûts
+            (`src.engine.costs`) l'applique symétriquement à l'achat et à
+            la vente, donc le coût total d'un aller-retour vaut
+            `2 * spread_pct`. Mesure depuis un carnet d'ordres :
+            `(vente - achat) / (vente + achat)`.
     """
 
     ticker: str

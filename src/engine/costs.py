@@ -16,8 +16,11 @@ Trois composantes, cumulables :
   grandes capitalisations françaises).
 - **Spread** : modélisé comme un glissement (slippage) additionnel,
   propre à chaque titre (`spread_pct`, champ de l'univers), qui s'ajoute
-  au glissement générique d'exécution (`base_slippage_pct`). Appliqué
-  symétriquement à l'entrée ET à la sortie.
+  au glissement générique d'exécution (`base_slippage_pct`). `spread_pct`
+  est le DEMI-spread : le coût supporté d'un seul côté de l'aller-retour,
+  mesuré depuis un carnet d'ordres via `(vente - achat) / (vente + achat)`.
+  Appliqué symétriquement à l'entrée ET à la sortie, donc le coût total
+  d'un aller-retour vaut `2 * spread_pct`.
 
 `vectorbt.Portfolio.from_signals` accepte `fees`, `fixed_fees` et
 `slippage` sous forme de Series alignées sur l'index des prix (un taux

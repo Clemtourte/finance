@@ -14,6 +14,12 @@
 # 1 milliard d'euros) : le préfixe ISIN est une heuristique raisonnable,
 # pas une source faisant foi.
 #
+# spread_pct est le DEMI-SPREAD : le coût supporté d'un seul côté de
+# l'aller-retour. Le moteur (src/engine/costs.py) l'applique
+# symétriquement à l'achat et à la vente, donc le coût total d'un
+# aller-retour vaut 2 x spread_pct. Mesure depuis un carnet d'ordres :
+# (vente - achat) / (vente + achat).
+#
 # spread_pct : place-holder uniforme (0,03%) en attendant un calibrage
 # par titre à partir de données de carnet d'ordres réelles ; les grandes
 # capitalisations du CAC 40 ont en pratique un spread plus resserré que
