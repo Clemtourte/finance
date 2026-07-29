@@ -1,0 +1,83 @@
+# Univers personnel — lignes réellement détenues (PEA Boursorama).
+#
+# Liste NON EXHAUSTIVE : d'autres lignes existent sur le compte et
+# devront être ajoutées ici. Arrêtée au 2026-07-29.
+#
+# --- Convention spread_pct ---
+# spread_pct est le DEMI-SPREAD : le coût supporté d'un seul côté de
+# l'aller-retour. Le moteur (src/engine/costs.py) l'applique
+# symétriquement à l'achat et à la vente, donc le coût total d'un
+# aller-retour vaut 2 x spread_pct.
+# Mesure depuis un carnet d'ordres :  (vente - achat) / (vente + achat)
+#
+# ⚠️ Toutes les valeurs ci-dessous sont des PLACEHOLDERS non mesurés,
+# sauf mention contraire. Ordres de grandeur, pas des chiffres à
+# prendre au sérieux — particulièrement sur les small caps, où le
+# spread est le poste de coût dominant.
+#
+# --- Convention ttf ---
+# La TTF ne frappe que les sociétés françaises dont la capitalisation
+# dépasse 1 Md€, admises sur un marché réglementé. Les parts d'ETF n'y
+# sont jamais soumises. 2CRSI et Kalray sont cotées sur Euronext Growth
+# (système multilatéral de négociation, pas un marché réglementé) et
+# sont très en deçà du seuil de capitalisation : ttf=false sur les deux
+# critères. À VÉRIFIER contre la liste officielle publiée par la DGFiP.
+#
+# --- Limites d'historique (relevé du 2026-07-29) ---
+# DCAM.PA  : 358 séances depuis 2025-03-04 → NON BACKTESTABLE.
+#            Ingéré et suivi, mais à exclure de tout backtest : un
+#            découpage in-sample/out-of-sample n'a aucun sens sur
+#            16 mois.
+# PAEEM.PA / PANX.PA : démarrent tous deux le 2019-04-25. Leurs
+#            dénominations actuelles ("ESG Transition", "Screened")
+#            suggèrent un changement d'indice de référence en cours de
+#            vie. Si c'est confirmé (DICI Amundi), l'historique
+#            antérieur au changement porte sur un autre sous-jacent et
+#            ne doit pas être backtesté. Aucun contrôle de
+#            src/data/validation.py ne peut détecter ce cas : les prix
+#            restent continus et plausibles.
+
+tickers:
+  # --- ETF ---
+  - ticker: ETZ.PA
+    name: "BNP Paribas Easy STOXX Europe 600 UCITS ETF EUR (ETZ)"
+    isin: FR0011550193
+    ttf: false
+    spread_pct: 0.0007   # placeholder (repris de universe_etf_pea.yaml)
+
+  - ticker: DCAM.PA
+    name: "Amundi PEA Monde (MSCI World) UCITS ETF Acc (DCAM)"
+    isin: FR001400U5Q4
+    ttf: false
+    spread_pct: 0.0005   # placeholder — ETF World, réputé liquide
+
+  - ticker: PANX.PA
+    name: "Amundi PEA US Tech Screened UCITS ETF Acc (PANX)"
+    isin: FR0013412269
+    ttf: false
+    spread_pct: 0.0010   # placeholder
+
+  - ticker: PAEEM.PA
+    name: "Amundi PEA Émergent (MSCI EM) ESG Transition UCITS ETF Acc (PAEEM)"
+    isin: FR0013412020
+    ttf: false
+    spread_pct: 0.0015   # placeholder — émergents, moins liquide
+
+  # --- Actions ---
+  - ticker: DG.PA
+    name: Vinci
+    isin: FR0000125486
+    ttf: true
+    spread_pct: 0.0003   # placeholder (repris de universe_cac40.yaml)
+
+  - ticker: AL2SI.PA
+    name: "2CRSI S.A."
+    isin: FR0013341781
+    ttf: false
+    spread_pct: 0.0075   # PLACEHOLDER GROSSIER — small cap, à mesurer
+
+  - ticker: ALKAL.PA
+    name: "Kalray S.A."
+    isin: FR0010722819
+    ttf: false
+    spread_pct: 0.0100   # PLACEHOLDER GROSSIER — small cap, à mesurer
