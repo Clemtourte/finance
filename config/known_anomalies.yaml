@@ -1,0 +1,114 @@
+# Ligne de base des anomalies de validation déjà examinées et acceptées.
+# Identité : (ticker, kind, date). Voir src/data/baseline.py.
+#
+# Les justifications ci-dessous portent sur des MÉCANISMES plausibles, pas
+# sur des événements vérifiés individuellement dans l'historique des
+# communiqués. Une note qui dit "volatilité de small cap" signifie "ce
+# mouvement est cohérent avec le profil du titre", pas "j'ai vérifié ce
+# qui s'est passé ce jour-là".
+#
+# Volontairement ABSENTES de ce fichier, car non comprises :
+#   ALKAL.PA 2024-11-28 (+109,7%) et 2024-11-29 (-40,7%)
+#   AL2SI.PA 2026-06-18 (-43,0%)
+# Elles continueront à être signalées comme nouvelles jusqu'à examen.
+anomalies:
+
+# --- Trous : fermetures de fin d'année Euronext Paris ---
+# Euronext ferme les 25 et 26 décembre. Combiné à un week-end et à une
+# demi-séance du 24 parfois absente des données Yahoo, l'écart atteint
+# 6 jours calendaires, au-dessus du seuil de 5. Faux positifs structurels,
+# qui se reproduiront certaines années.
+
+- ticker: DG.PA
+  kind: gap
+  date: 2012-12-21
+  note: "Fermeture de Noël 2012. 6 jours calendaires entre le 21/12 et le 27/12. Faux positif structurel du seuil à 5 jours."
+
+- ticker: ETZ.PA
+  kind: gap
+  date: 2014-12-23
+  note: "Fermeture de Noël 2014. 6 jours calendaires entre le 23/12 et le 29/12. Aucune barre le 24/12 : demi-séance sans transaction enregistrée pour cet ETF."
+
+# --- 2CRSI (AL2SI.PA) : small cap Euronext Growth ---
+# Capitalisation faible, flottant réduit, carnet d'ordres mince. Des
+# variations de 40 à 65 % en une séance sur annonce sont dans le domaine
+# du normal pour ce profil. Ce sont des cotations réelles, pas des
+# données corrompues.
+
+- ticker: AL2SI.PA
+  kind: outlier
+  date: 2019-09-25
+  note: "-42,9% à 3,80 EUR. Small cap Euronext Growth, mouvement sur événement. Mécanisme plausible, événement non vérifié individuellement."
+
+- ticker: AL2SI.PA
+  kind: outlier
+  date: 2023-11-20
+  note: "+66,3% à 1,27 EUR. Cours très bas à l'époque : forte amplitude relative mécanique. Cotation réelle."
+
+- ticker: AL2SI.PA
+  kind: outlier
+  date: 2024-01-19
+  note: "+55,1% à 2,35 EUR. Début de la phase de reprise du titre. Cotation réelle."
+
+# --- Kalray (ALKAL.PA) : deux régimes distincts ---
+#
+# Régime 1 — cours élevé (> 5 EUR) : mouvements sur événement, comme
+# n'importe quelle small cap.
+#
+# Régime 2 — cours effondré (0,55 à 2,20 EUR, de nov. 2024 à janv. 2026) :
+# à ces niveaux, le pas de cotation et un carnet mince suffisent à
+# produire ±30 % dans la journée. Le seuil de 30 %, pertinent sur un
+# titre à 100 EUR, décrit ici le quotidien du titre.
+#
+# C'est une limite du détecteur — un seuil en pourcentage n'a pas le même
+# sens selon le niveau de prix — et non un défaut des données.
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2019-12-16
+  note: "+31,3% à 17,60 EUR. Régime de cours élevé : mouvement sur événement. Mécanisme plausible, événement non vérifié."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2024-11-11
+  note: "+47,1% à 1,25 EUR. Régime de cours effondré : amplitude relative mécanique."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2025-02-10
+  note: "+45,4% à 0,83 EUR. Régime de cours effondré."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2025-02-27
+  note: "+47,6% à 0,89 EUR. Régime de cours effondré."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2025-05-22
+  note: "+32,1% à 0,555 EUR. Plus bas historique de la série : amplitude relative maximale."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2025-07-11
+  note: "+49,6% à 0,718 EUR. Régime de cours effondré."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2025-09-11
+  note: "+39,4% à 0,74 EUR. Régime de cours effondré."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2025-09-25
+  note: "+51,4% à 1,27 EUR. Régime de cours effondré."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2026-01-16
+  note: "+36,1% à 2,17 EUR. Sortie du régime de cours effondré, amplitude encore élevée."
+
+- ticker: ALKAL.PA
+  kind: outlier
+  date: 2026-04-24
+  note: "+38,7% à 8,35 EUR. Phase de forte reprise du titre. Mécanisme plausible, événement non vérifié."
