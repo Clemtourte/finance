@@ -18,6 +18,11 @@ cette re-sonde (ex. la source a depuis publié un historique plus
 profond) :
 
     uv run python -m src.data.ingest --config config/data.yaml --backfill
+
+En fin d'exécution, un rapport de validation détaillé (trous, valeurs
+aberrantes, splits suspects, séance par séance) est affiché sur la sortie
+standard (voir `src.reporting.validation.format_validation_summary`).
+Passer `--quiet` pour le supprimer ; les logs restent inchangés.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from src.data.duckdb_loader import DuckDBLoader
 from src.data.provider import DataProvider
 from src.data.validation import ValidationReport, validate_ohlcv
 from src.data.yfinance_provider import YFinanceProvider
+from src.reporting.validation import format_validation_summary
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +149,12 @@ def main() -> None:
         help="Re-sonde aussi la plage antérieure à la première date déjà en cache "
         "pour chaque ticker (désactivé par défaut, voir docstring de module)",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Supprime le rapport de validation détaillé affiché en fin d'exécution "
+        "(les logs restent inchangés)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -156,6 +168,9 @@ def main() -> None:
     if tickers_with_issues:
         logger.warning("Tickers avec anomalies détectées : %s", ", ".join(tickers_with_issues))
     logger.info("Ingestion terminée : %d tickers traités", len(reports))
+
+    if not args.quiet:
+        print(format_validation_summary(reports))
 
 
 if __name__ == "__main__":

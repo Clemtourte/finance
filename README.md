@@ -273,6 +273,21 @@ Pour chaque ticker de l'univers :
 5. recharge l'historique complet du ticker dans DuckDB
    (`data/warehouse.duckdb`, table `ohlcv_daily`).
 
+En fin d'exécution, un rapport de validation détaillé est affiché sur la
+sortie standard (`src/reporting/validation.py`) : pour chaque ticker en
+anomalie, la liste des séances concernées (trous avec leurs deux dates et
+le nombre de jours calendaires, valeurs aberrantes avec leur date et leur
+rendement journalier signé, splits suspects avec leur date et le ratio
+reconnu), suivie d'un total par catégorie. Les logs (`logger.warning`) ne
+donnent que des cardinalités par ticker ; ce rapport donne le détail
+actionnable — quelles séances regarder — sans avoir à écrire un script ad
+hoc pour inspecter les `DataFrame` du rapport. Passer `--quiet` pour le
+supprimer (les logs restent inchangés) :
+
+```bash
+uv run python -m src.data.ingest --config config/data.yaml --quiet
+```
+
 ### 3. Interroger l'entrepôt
 
 ```python
