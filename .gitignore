@@ -13,6 +13,7 @@ wheels/
 data/cache/
 data/*.duckdb
 data/*.duckdb.wal
+data/*.csv
 
 # Tests / outils
 .pytest_cache/
