@@ -6,8 +6,9 @@ install:
 test:
 	uv run pytest
 
+# Exemple : make ingest UNIVERSE=config/universe_etf_pea.yaml
 ingest:
-	uv run python -m src.data.ingest --config config/data.yaml
+	uv run python -m src.data.ingest --config config/data.yaml $(if $(UNIVERSE),--universe-file $(UNIVERSE),)
 
 # Exemple : make backtest TICKER=AI.PA SPLIT=2020-01-01
 backtest:

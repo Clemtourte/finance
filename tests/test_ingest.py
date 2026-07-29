@@ -7,6 +7,7 @@ Un `FakeProvider` en mémoire remplace `YFinanceProvider` pour vérifier :
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -16,7 +17,7 @@ import pytest
 
 from src.data.cache import ParquetCache
 from src.data.config import DataConfig, TickerInfo, ValidationConfig, YFinanceConfig
-from src.data.ingest import run_ingestion, sync_ticker
+from src.data.ingest import main, run_ingestion, sync_ticker
 from src.data.provider import DataProvider, empty_ohlcv_frame
 
 
@@ -138,3 +139,105 @@ def test_run_ingestion_second_run_does_not_duplicate_rows(data_config):
 
     expected_days = len(pd.bdate_range(start=date(2024, 1, 1), end=date(2024, 1, 10)))
     assert count == expected_days
+
+
+class _FakeYFinanceProvider(FakeProvider):
+    """Double de `YFinanceProvider` acceptant les mêmes kwargs de résilience."""
+
+    def __init__(
+        self,
+        max_retries: int = 3,
+        retry_backoff_seconds: float = 2.0,
+        request_pause_seconds: float = 0.3,
+    ) -> None:
+        super().__init__()
+
+
+@pytest.fixture
+def ingest_cli_workspace(tmp_path):
+    default_universe_path = tmp_path / "universe_default.yaml"
+    default_universe_path.write_text(
+        """
+tickers:
+  - ticker: MC.PA
+    name: LVMH
+    isin: FR0000121014
+""",
+        encoding="utf-8",
+    )
+
+    override_universe_path = tmp_path / "universe_override.yaml"
+    override_universe_path.write_text(
+        """
+tickers:
+  - ticker: AI.PA
+    name: Air Liquide
+    isin: FR0000120073
+""",
+        encoding="utf-8",
+    )
+
+    db_path = tmp_path / "warehouse.duckdb"
+    data_config_path = tmp_path / "data.yaml"
+    data_config_path.write_text(
+        f"""
+universe_file: {default_universe_path}
+period:
+  start_date: "2024-01-01"
+  end_date: "2024-01-10"
+cache_dir: {tmp_path / "cache"}
+duckdb:
+  path: {db_path}
+  table: ohlcv_daily
+yfinance:
+  max_retries: 1
+  retry_backoff_seconds: 0.0
+  request_pause_seconds: 0.0
+validation:
+  max_gap_calendar_days: 5
+  outlier_return_threshold: 0.30
+  split_ratio_tolerance: 0.03
+""",
+        encoding="utf-8",
+    )
+
+    return {
+        "data_config": data_config_path,
+        "override_universe": override_universe_path,
+        "db_path": db_path,
+    }
+
+
+def _tickers_in_duckdb(db_path) -> set[str]:
+    with duckdb.connect(str(db_path)) as conn:
+        return {row[0] for row in conn.execute("SELECT DISTINCT ticker FROM ohlcv_daily").fetchall()}
+
+
+def test_main_universe_file_argument_overrides_config_default(ingest_cli_workspace, monkeypatch):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _FakeYFinanceProvider)
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+        "--universe-file",
+        str(ingest_cli_workspace["override_universe"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    assert _tickers_in_duckdb(ingest_cli_workspace["db_path"]) == {"AI.PA"}
+
+
+def test_main_without_universe_file_argument_uses_config_default(ingest_cli_workspace, monkeypatch):
+    monkeypatch.setattr("src.data.ingest.YFinanceProvider", _FakeYFinanceProvider)
+    argv = [
+        "prog",
+        "--config",
+        str(ingest_cli_workspace["data_config"]),
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    assert _tickers_in_duckdb(ingest_cli_workspace["db_path"]) == {"MC.PA"}

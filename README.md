@@ -69,7 +69,11 @@ l'entrée ET à la sortie de chaque position (sauf mention contraire) :
   fichier d'univers (grandes capitalisations françaises).
 - **Spread par titre** (champ `spread_pct` de l'univers), modélisé comme
   un glissement additionnel symétrique, cumulé au glissement générique
-  d'exécution (`base_slippage_pct`).
+  d'exécution (`base_slippage_pct`). `spread_pct` est le **demi-spread** :
+  le coût supporté d'un seul côté de l'aller-retour (mesuré depuis un
+  carnet d'ordres via `(vente - achat) / (vente + achat)`) ; appliqué
+  symétriquement à l'achat et à la vente, le coût total d'un
+  aller-retour vaut donc `2 x spread_pct`.
 
 Comme le courtage dépend du montant de chaque ordre (pas un taux plat),
 `build_order_cost_arrays` simule séquentiellement les allers-retours
@@ -207,16 +211,17 @@ uv sync
 - `config/universe_etf_pea.yaml` — 4 ETF PEA (CW8/EWLD monde, PSP5
   S&P 500, ETZ Europe).
 - `config/data.yaml` — période d'historique, chemins de cache/DuckDB,
-  paramètres de résilience yfinance, seuils de validation. `--config`
-  du CLI d'ingestion pointe toujours vers un seul fichier d'univers à la
-  fois (`universe_file`) ; pour ingérer les deux univers, ingérer l'un
-  puis l'autre en changeant temporairement `universe_file`, ou passer le
-  fichier voulu directement à `load_universe`.
+  paramètres de résilience yfinance, seuils de validation. `universe_file`
+  y définit l'univers par défaut ; `--universe-file` du CLI d'ingestion
+  permet de le remplacer ponctuellement (voir section suivante) sans
+  éditer ce fichier, par exemple pour ingérer plusieurs univers l'un
+  après l'autre dans une exécution automatisée.
 
 Chaque entrée d'univers porte, en plus de `ticker`/`name`/`isin`, deux
 champs consommés par le moteur de coûts (`src.engine.costs`) : `ttf`
 (éligibilité à la taxe sur les transactions financières) et `spread_pct`
-(spread bid/ask propre au titre). Voir les commentaires en tête de
+(demi-spread propre au titre — voir « Modèle de coûts » ci-dessous pour
+la convention exacte). Voir les commentaires en tête de
 chaque fichier YAML pour la méthode et les limites de ces valeurs — **à
 vérifier avant tout usage réel**, ce ne sont que des points de départ.
 
@@ -229,6 +234,16 @@ fichiers.
 make ingest
 # équivalent :
 uv run python -m src.data.ingest --config config/data.yaml
+```
+
+Pour ingérer un univers différent de celui de `config/data.yaml` sans
+éditer ce fichier (utile pour enchaîner plusieurs univers dans une
+exécution automatisée) :
+
+```bash
+make ingest UNIVERSE=config/universe_etf_pea.yaml
+# équivalent :
+uv run python -m src.data.ingest --config config/data.yaml --universe-file config/universe_etf_pea.yaml
 ```
 
 Pour chaque ticker de l'univers :

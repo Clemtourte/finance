@@ -3,6 +3,11 @@
 Point d'entrée en ligne de commande :
 
     uv run python -m src.data.ingest --config config/data.yaml
+
+Pour ingérer un univers différent de celui de `--config` sans éditer le
+fichier de configuration (ex. exécution automatisée) :
+
+    uv run python -m src.data.ingest --config config/data.yaml --universe-file config/universe_etf_pea.yaml
 """
 
 from __future__ import annotations
@@ -107,12 +112,16 @@ def main() -> None:
     """CLI : lance l'ingestion complète depuis un fichier de configuration."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config/data.yaml", help="Chemin du fichier de configuration")
+    parser.add_argument(
+        "--universe-file", default=None, help="Fichier d'univers (ex. config/universe_cac40.yaml)"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     config = load_data_config(args.config)
-    universe = load_universe(config.universe_file)
+    universe_file = args.universe_file or config.universe_file
+    universe = load_universe(universe_file)
     reports = run_ingestion(config, universe)
 
     tickers_with_issues = [t for t, r in reports.items() if r.has_issues]
