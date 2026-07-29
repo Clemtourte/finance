@@ -8,6 +8,16 @@ Pour ingérer un univers différent de celui de `--config` sans éditer le
 fichier de configuration (ex. exécution automatisée) :
 
     uv run python -m src.data.ingest --config config/data.yaml --universe-file config/universe_etf_pea.yaml
+
+Par défaut, la plage antérieure à la première date déjà en cache pour un
+ticker n'est jamais re-sondée (voir `src.data.cache.ParquetCache.
+missing_ranges`) : un titre dont l'historique disponible est plus court
+que `start_date` produirait sinon une erreur "possibly delisted" à
+chaque exécution, bruit qui masque une vraie radiation. Pour forcer
+cette re-sonde (ex. la source a depuis publié un historique plus
+profond) :
+
+    uv run python -m src.data.ingest --config config/data.yaml --backfill
 """
 
 from __future__ import annotations
@@ -35,6 +45,8 @@ def sync_ticker(
     ticker: str,
     start: date,
     end: date,
+    *,
+    backfill: bool = False,
 ) -> pl.DataFrame:
     """Met à jour le cache d'un ticker en ne téléchargeant que le delta manquant.
 
@@ -44,12 +56,15 @@ def sync_ticker(
         ticker: Symbole du titre.
         start: Première date (incluse) souhaitée.
         end: Dernière date (incluse) souhaitée.
+        backfill: Transmis à `ParquetCache.missing_ranges` : si `True`,
+            re-sonde aussi la plage antérieure à la première date déjà en
+            cache (voir sa docstring).
 
     Returns:
         DataFrame Polars couvrant `[start, end]`, servi depuis le cache
         après mise à jour.
     """
-    for missing in cache.missing_ranges(ticker, start, end):
+    for missing in cache.missing_ranges(ticker, start, end, backfill=backfill):
         raw = provider.get_ohlcv(ticker, missing.start, missing.end)
         if not raw.empty:
             cache.upsert(ticker, ticker, pl.from_pandas(raw))
@@ -62,6 +77,8 @@ def run_ingestion(
     config: DataConfig,
     universe: list[TickerInfo],
     provider: DataProvider | None = None,
+    *,
+    backfill: bool = False,
 ) -> dict[str, ValidationReport]:
     """Exécute l'ingestion complète pour tout un univers de tickers.
 
@@ -71,6 +88,9 @@ def run_ingestion(
         provider: Provider à utiliser ; par défaut `YFinanceProvider`
             construit depuis `config.yfinance`. Injecter un autre provider
             (ex. un double de test) pour éviter les appels réseau.
+        backfill: Transmis à `sync_ticker`/`ParquetCache.missing_ranges` :
+            si `True`, re-sonde aussi la plage antérieure à la première
+            date déjà en cache pour chaque ticker.
 
     Returns:
         Dictionnaire `ticker -> ValidationReport` pour inspection.
@@ -82,7 +102,9 @@ def run_ingestion(
     with DuckDBLoader(config.duckdb_path, config.duckdb_table) as loader:
         for info in universe:
             logger.info("Synchronisation %s (%s)", info.ticker, info.name)
-            df = sync_ticker(provider, cache, info.ticker, config.start_date, config.end_date)
+            df = sync_ticker(
+                provider, cache, info.ticker, config.start_date, config.end_date, backfill=backfill
+            )
             df_pd = df.to_pandas()
 
             report = validate_ohlcv(
@@ -115,6 +137,12 @@ def main() -> None:
     parser.add_argument(
         "--universe-file", default=None, help="Fichier d'univers (ex. config/universe_cac40.yaml)"
     )
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help="Re-sonde aussi la plage antérieure à la première date déjà en cache "
+        "pour chaque ticker (désactivé par défaut, voir docstring de module)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -122,7 +150,7 @@ def main() -> None:
     config = load_data_config(args.config)
     universe_file = args.universe_file or config.universe_file
     universe = load_universe(universe_file)
-    reports = run_ingestion(config, universe)
+    reports = run_ingestion(config, universe, backfill=args.backfill)
 
     tickers_with_issues = [t for t, r in reports.items() if r.has_issues]
     if tickers_with_issues:

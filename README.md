@@ -246,6 +246,21 @@ make ingest UNIVERSE=config/universe_etf_pea.yaml
 uv run python -m src.data.ingest --config config/data.yaml --universe-file config/universe_etf_pea.yaml
 ```
 
+Par défaut, la plage antérieure à la première date déjà en cache pour un
+ticker n'est **jamais** re-sondée : le cache traite sa borne basse comme
+"le plus ancien que la source possède". Sans cette règle, un titre dont
+l'historique yfinance démarre après `start_date` (ex. une petite
+capitalisation introduite récemment) redemanderait cette plage vide à
+chaque run, produirait une erreur "possibly delisted" **systématique**
+sur ce ticker, et rendrait impossible de distinguer ce bruit attendu
+d'une vraie radiation dans un job automatisé. Pour forcer cette
+re-vérification (ex. la source a depuis publié un historique plus
+profond que lors du premier run) :
+
+```bash
+uv run python -m src.data.ingest --config config/data.yaml --backfill
+```
+
 Pour chaque ticker de l'univers :
 
 1. calcule la portion de l'intervalle `[start_date, end_date]` **absente**

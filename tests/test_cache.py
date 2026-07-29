@@ -75,7 +75,18 @@ def test_missing_ranges_covers_delta_before_and_after_cached_range(tmp_path):
     # Cache couvre Jan 6 -> Jan 10.
     cache.upsert("AI.PA", "AI.PA", _rows(_dates(date(2024, 1, 6), 5)))
 
+    # Par défaut (backfill=False), la plage antérieure à cached.start n'est
+    # jamais renvoyée : seule la plage postérieure est manquante.
     ranges = cache.missing_ranges("AI.PA", date(2024, 1, 1), date(2024, 1, 12))
+    assert ranges == [DateRange(date(2024, 1, 11), date(2024, 1, 12))]
+
+
+def test_missing_ranges_with_backfill_also_covers_delta_before_cached_range(tmp_path):
+    cache = ParquetCache(tmp_path)
+    # Cache couvre Jan 6 -> Jan 10.
+    cache.upsert("AI.PA", "AI.PA", _rows(_dates(date(2024, 1, 6), 5)))
+
+    ranges = cache.missing_ranges("AI.PA", date(2024, 1, 1), date(2024, 1, 12), backfill=True)
     assert ranges == [
         DateRange(date(2024, 1, 1), date(2024, 1, 5)),
         DateRange(date(2024, 1, 11), date(2024, 1, 12)),

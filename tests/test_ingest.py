@@ -85,6 +85,18 @@ def test_sync_ticker_noop_when_already_fully_cached(tmp_path):
     assert provider.calls == []
 
 
+def test_sync_ticker_does_not_refetch_range_before_cached_start_by_default(tmp_path):
+    cache = ParquetCache(tmp_path)
+    provider = FakeProvider()
+
+    sync_ticker(provider, cache, "AI.PA", date(2024, 1, 6), date(2024, 1, 10))
+    provider.calls.clear()
+
+    sync_ticker(provider, cache, "AI.PA", date(2024, 1, 1), date(2024, 1, 10))
+
+    assert provider.calls == []
+
+
 @pytest.fixture
 def data_config(tmp_path) -> DataConfig:
     return DataConfig(

@@ -63,25 +63,37 @@ class ParquetCache:
             return None
         return DateRange(start=df["date"].min(), end=df["date"].max())
 
-    def missing_ranges(self, ticker: str, start: date, end: date) -> list[DateRange]:
+    def missing_ranges(
+        self, ticker: str, start: date, end: date, *, backfill: bool = False
+    ) -> list[DateRange]:
         """Calcule les sous-intervalles de `[start, end]` absents du cache.
 
         Args:
             ticker: Symbole du titre.
             start: Première date (incluse) souhaitée.
             end: Dernière date (incluse) souhaitée.
+            backfill: Si `False` (défaut), la plage antérieure à la
+                première date déjà en cache n'est jamais renvoyée : le
+                cache traite sa borne basse comme "le plus ancien que la
+                source possède" (voir Note). Passer `True` pour forcer sa
+                re-vérification malgré tout (ex. la source a depuis publié
+                un historique plus profond que lors du premier run).
 
         Returns:
             Liste de `DateRange` à télécharger. Vide si l'intervalle demandé
-            est déjà entièrement couvert par le cache.
+            est déjà entièrement couvert par le cache (ou par la règle de
+            non-backfill ci-dessus).
 
         Note:
             Le cache ne connaît que le min/max des dates déjà stockées, pas
-            un calendrier de bourse. Si `start` tombe un jour non coté (ex.
-            1er janvier), la plage manquante avant le premier jour coté en
-            cache sera recalculée (et re-sondée, sans effet, réponse vide)
-            à chaque appel. Sans conséquence sur les données (aucun
-            doublon), juste un appel réseau superflu occasionnel.
+            un calendrier de bourse ni la date d'introduction en bourse du
+            titre. Sans la règle par défaut ci-dessus, la plage antérieure
+            à la première date en cache serait recalculée (et re-sondée) à
+            chaque appel : pour un titre dont l'historique disponible est
+            plus court que `start` demandé, cette re-sonde est
+            systématique (pas occasionnelle), échoue à chaque run
+            ("possibly delisted"), et masque une vraie radiation derrière
+            un bruit attendu.
         """
         if start > end:
             return []
@@ -91,7 +103,7 @@ class ParquetCache:
             return [DateRange(start, end)]
 
         ranges: list[DateRange] = []
-        if start < cached.start:
+        if backfill and start < cached.start:
             ranges.append(DateRange(start, cached.start - timedelta(days=1)))
         if end > cached.end:
             ranges.append(DateRange(cached.end + timedelta(days=1), end))
