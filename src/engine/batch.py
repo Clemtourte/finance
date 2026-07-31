@@ -4,10 +4,27 @@ Point d'entrée en ligne de commande :
 
     uv run python -m src.engine.batch --universe-file config/universe_cac40.yaml --split-date 2020-01-01
 
+Par défaut, la stratégie de référence (SMA crossover) est utilisée. Pour
+en choisir une autre parmi celles du registre (`src.strategies.registry`) :
+
+    uv run python -m src.engine.batch --universe-file config/universe_cac40.yaml --split-date 2020-01-01 --strategy momentum_12_1
+
+`--strategy-config` reste disponible pour surcharger le fichier YAML de
+paramètres (défaut : celui du registre pour `--strategy`).
+
+`--universe-file` est optionnel : par défaut, l'univers vient de
+`universe_file` dans `--data-config` (`config/data.yaml`).
+
 Comme le CLI mono-ticker (`src.engine.cli`), la coupure in-sample/
 out-of-sample est obligatoire : le verdict SURVIT/REJETÉ ne porte que sur
 l'out-of-sample, jamais sur la période complète (sinon on mesure la
 capacité de la stratégie à coller au passé, pas sa capacité à généraliser).
+
+`SURVIT` exige deux conditions cumulatives sur l'out-of-sample : battre le
+buy & hold ET avoir un CAGR strictement positif. Battre une référence qui
+s'effondre ne suffit pas — sur un titre en forte baisse, toute règle qui
+passe du temps hors du marché bat mécaniquement le buy & hold sans avoir
+généré le moindre gain ; ce n'est pas une performance, c'est une absence.
 """
 
 from __future__ import annotations
@@ -17,6 +34,8 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 
+import pandas as pd
+
 from src.data.config import DataConfig, TickerInfo, load_data_config, load_universe
 from src.data.duckdb_loader import read_ohlcv
 from src.engine.backtest import run_backtest, run_buy_and_hold
@@ -24,7 +43,7 @@ from src.engine.config import BacktestConfig, load_backtest_config
 from src.metrics.performance import compute_metrics_from_series, split_portfolio_by_date
 from src.reporting.table import export_batch_csv, format_batch_table
 from src.strategies.base import Strategy
-from src.strategies.sma_crossover import load_sma_crossover_strategy
+from src.strategies.registry import STRATEGIES, display_name, load_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +52,40 @@ logger = logging.getLogger(__name__)
 #: cohérente avec l'objectif de falsification du projet — en cas de doute,
 #: ne pas prétendre que la stratégie survit.
 _UNDEFINED_VERDICT = "REJETÉ"
+
+#: Verdict quand l'in-sample ou l'out-of-sample compte moins de
+#: `min_bars_per_period` séances : SURVIT/REJETÉ signifient tous deux
+#: "j'ai testé" ; ici rien n'a été testé (un seul mouvement de marché
+#: suffirait à décider du résultat), donc ni l'un ni l'autre.
+_NOT_TESTABLE_VERDICT = "NON TESTABLE"
+
+
+def _count_bars_each_side(df: pd.DataFrame, split_date: date) -> tuple[int, int]:
+    """Compte les séances strictement avant / à partir de `split_date`.
+
+    Args:
+        df: Historique OHLCV du ticker (index de dates croissant).
+        split_date: Date de coupure in-sample/out-of-sample.
+
+    Returns:
+        `(n_bars_is, n_bars_oos)`.
+    """
+    split_ts = pd.Timestamp(split_date)
+    n_bars_is = int((df.index < split_ts).sum())
+    n_bars_oos = int((df.index >= split_ts).sum())
+    return n_bars_is, n_bars_oos
+
+
+def _insufficient_bars_reason(n_bars_is: int, n_bars_oos: int, min_bars_per_period: int) -> str | None:
+    """Message lisible si l'in-sample ou l'out-of-sample est trop court, sinon `None`."""
+    reasons = []
+    if n_bars_is < min_bars_per_period:
+        reasons.append(f"in-sample : {n_bars_is} séances sur {min_bars_per_period} exigées")
+    if n_bars_oos < min_bars_per_period:
+        reasons.append(f"out-of-sample : {n_bars_oos} séances sur {min_bars_per_period} exigées")
+    if not reasons:
+        return None
+    return "Période insuffisante pour juger (" + " ; ".join(reasons) + ")"
 
 
 @dataclass(frozen=True)
@@ -47,10 +100,18 @@ class BatchResult:
         delta: `strategy_cagr_oos - benchmark_cagr_oos`.
         friction_pct_oos: Friction de la stratégie en % du gain brut, out-of-sample.
         verdict: `"SURVIT"` si la stratégie bat le buy & hold net de coûts
-            sur l'out-of-sample, `"REJETÉ"` sinon (y compris si la
-            comparaison est indéfinie), `"ERREUR"` si le backtest de ce
-            ticker a échoué.
-        error: Message d'erreur si `verdict == "ERREUR"`, sinon `None`.
+            ET affiche un CAGR strictement positif sur l'out-of-sample ;
+            `"REJETÉ"` sinon (y compris si la comparaison est indéfinie,
+            ou si la stratégie bat le buy & hold sans être elle-même
+            rentable — voir `error` pour ce dernier cas) ; `"ERREUR"` si
+            le backtest de ce ticker a échoué ; `"NON TESTABLE"` si
+            l'in-sample ou l'out-of-sample compte moins de
+            `min_bars_per_period` séances (aucun verdict rendu, voir
+            `error` pour la raison).
+        error: Message d'erreur si `verdict == "ERREUR"`, raison de
+            l'insuffisance si `verdict == "NON TESTABLE"`, motif si
+            `verdict == "REJETÉ"` parce que la stratégie bat le buy & hold
+            en perdant elle-même de l'argent, sinon `None`.
     """
 
     ticker: str
@@ -77,6 +138,20 @@ def _run_single_ticker(
         start=data_config.start_date,
         end=data_config.end_date,
     )
+
+    n_bars_is, n_bars_oos = _count_bars_each_side(df, split_date)
+    reason = _insufficient_bars_reason(n_bars_is, n_bars_oos, backtest_config.min_bars_per_period)
+    if reason is not None:
+        return BatchResult(
+            ticker=info.ticker,
+            name=info.name,
+            strategy_cagr_oos=float("nan"),
+            benchmark_cagr_oos=float("nan"),
+            delta=float("nan"),
+            friction_pct_oos=float("nan"),
+            verdict=_NOT_TESTABLE_VERDICT,
+            error=reason,
+        )
 
     target_position = strategy.generate_signals(df)
     strategy_pf = run_backtest(
@@ -111,20 +186,36 @@ def _run_single_ticker(
         info.ttf, info.spread_pct, periods_per_year, risk_free_rate,
     )
 
-    delta = strategy_metrics_oos.cagr - benchmark_metrics_oos.cagr
+    strategy_cagr = strategy_metrics_oos.cagr
+    benchmark_cagr = benchmark_metrics_oos.cagr
+    delta = strategy_cagr - benchmark_cagr
+
+    error: str | None = None
     if delta != delta:  # NaN check sans dépendre de math/numpy ici
         verdict = _UNDEFINED_VERDICT
+    elif delta > 0 and strategy_cagr > 0:
+        verdict = "SURVIT"
+    elif delta > 0:
+        # Bat le buy & hold, mais uniquement parce que celui-ci s'effondre
+        # plus vite : la stratégie elle-même perd de l'argent, ce n'est
+        # pas une performance. Voir docstring du module.
+        verdict = "REJETÉ"
+        error = (
+            f"Bat le buy & hold ({benchmark_cagr:.1%}/an) mais perd de "
+            f"l'argent ({strategy_cagr:.1%}/an)"
+        )
     else:
-        verdict = "SURVIT" if delta > 0 else "REJETÉ"
+        verdict = "REJETÉ"
 
     return BatchResult(
         ticker=info.ticker,
         name=info.name,
-        strategy_cagr_oos=strategy_metrics_oos.cagr,
-        benchmark_cagr_oos=benchmark_metrics_oos.cagr,
+        strategy_cagr_oos=strategy_cagr,
+        benchmark_cagr_oos=benchmark_cagr,
         delta=delta,
         friction_pct_oos=strategy_metrics_oos.friction_pct_of_gross_gain,
         verdict=verdict,
+        error=error,
     )
 
 
@@ -178,10 +269,26 @@ def run_batch(
 def main() -> None:
     """CLI : lance une stratégie sur tout un univers et affiche le récapitulatif."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--universe-file", required=True, help="Fichier d'univers (ex. config/universe_cac40.yaml)")
+    parser.add_argument(
+        "--universe-file",
+        default=None,
+        help="Fichier d'univers (ex. config/universe_cac40.yaml) ; défaut : "
+        "celui de --data-config (universe_file)",
+    )
     parser.add_argument("--data-config", default="config/data.yaml")
     parser.add_argument("--backtest-config", default="config/backtest.yaml")
-    parser.add_argument("--strategy-config", default="config/strategies/sma_crossover.yaml")
+    parser.add_argument(
+        "--strategy",
+        default="sma_crossover",
+        choices=sorted(STRATEGIES),
+        help="Stratégie à backtester (défaut : sma_crossover)",
+    )
+    parser.add_argument(
+        "--strategy-config",
+        default=None,
+        help="Surcharge le fichier YAML de paramètres de --strategy "
+        "(défaut : chemin par défaut du registre pour cette stratégie)",
+    )
     parser.add_argument(
         "--split-date",
         required=True,
@@ -194,22 +301,27 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    universe = load_universe(args.universe_file)
     data_config = load_data_config(args.data_config)
+    universe_file = args.universe_file or data_config.universe_file
+    universe = load_universe(universe_file)
     backtest_config = load_backtest_config(args.backtest_config)
-    strategy = load_sma_crossover_strategy(args.strategy_config)
+    strategy = load_strategy(args.strategy, args.strategy_config)
 
     results = run_batch(universe, strategy, data_config, backtest_config, args.split_date)
 
     n_survives = sum(1 for r in results if r.verdict == "SURVIT")
     n_rejected = sum(1 for r in results if r.verdict == "REJETÉ")
+    n_not_testable = sum(1 for r in results if r.verdict == _NOT_TESTABLE_VERDICT)
     n_errors = sum(1 for r in results if r.verdict == "ERREUR")
 
     print(
-        f"Batch {len(results)} tickers | split: {args.split_date} | stratégie: SMA crossover "
-        f"{strategy.params}"
+        f"Batch {len(results)} tickers | split: {args.split_date} | stratégie: "
+        f"{display_name(args.strategy)} {strategy.params}"
     )
-    print(f"SURVIT: {n_survives} | REJETÉ: {n_rejected} | ERREUR: {n_errors}\n")
+    print(
+        f"SURVIT: {n_survives} | REJETÉ: {n_rejected} | NON TESTABLE: {n_not_testable} "
+        f"| ERREUR: {n_errors}\n"
+    )
     print(format_batch_table(results))
 
     if args.output_csv:

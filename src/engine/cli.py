@@ -4,6 +4,15 @@ Exemple :
 
     uv run python -m src.engine.cli --ticker AI.PA
 
+Par défaut, la stratégie de référence (SMA crossover) est utilisée.
+Pour en choisir une autre parmi celles du registre
+(`src.strategies.registry`) :
+
+    uv run python -m src.engine.cli --ticker AI.PA --strategy momentum_12_1
+
+`--strategy-config` reste disponible pour surcharger le fichier YAML de
+paramètres (défaut : celui du registre pour `--strategy`).
+
 Le ticker doit déjà avoir été ingéré dans l'entrepôt DuckDB (voir
 `src.data.ingest`).
 """
@@ -14,14 +23,16 @@ import argparse
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
+
 from src.data.config import load_data_config, load_universe
 from src.data.duckdb_loader import read_ohlcv
 from src.engine.backtest import run_backtest, run_buy_and_hold
 from src.engine.config import load_backtest_config
 from src.metrics.comparison import compare
 from src.metrics.performance import compute_metrics, compute_metrics_from_series, split_portfolio_by_date
-from src.reporting.table import export_comparison_csv, format_comparison_table
-from src.strategies.sma_crossover import load_sma_crossover_strategy
+from src.reporting.table import export_comparison_csv, format_comparison_table, format_friction_pct
+from src.strategies.registry import STRATEGIES, display_name, load_strategy
 
 
 def _parse_date(value: str) -> date:
@@ -39,7 +50,18 @@ def main() -> None:
     parser.add_argument("--ticker", required=True, help="Ticker à backtester (ex. AI.PA)")
     parser.add_argument("--data-config", default="config/data.yaml")
     parser.add_argument("--backtest-config", default="config/backtest.yaml")
-    parser.add_argument("--strategy-config", default="config/strategies/sma_crossover.yaml")
+    parser.add_argument(
+        "--strategy",
+        default="sma_crossover",
+        choices=sorted(STRATEGIES),
+        help="Stratégie à backtester (défaut : sma_crossover)",
+    )
+    parser.add_argument(
+        "--strategy-config",
+        default=None,
+        help="Surcharge le fichier YAML de paramètres de --strategy "
+        "(défaut : chemin par défaut du registre pour cette stratégie)",
+    )
     parser.add_argument("--start", type=_parse_date, default=None, help="Surcharge la date de début (YYYY-MM-DD)")
     parser.add_argument("--end", type=_parse_date, default=None, help="Surcharge la date de fin (YYYY-MM-DD)")
     parser.add_argument("--output-csv", default=None, help="Chemin d'export CSV du tableau de comparaison")
@@ -78,7 +100,7 @@ def main() -> None:
 
     data_config = load_data_config(args.data_config)
     backtest_config = load_backtest_config(args.backtest_config)
-    strategy = load_sma_crossover_strategy(args.strategy_config)
+    strategy = load_strategy(args.strategy, args.strategy_config)
     rebalance_freq = args.rebalance_freq or backtest_config.rebalance_freq
 
     universe_file = args.universe_file or data_config.universe_file
@@ -120,8 +142,8 @@ def main() -> None:
         for t in backtest_config.costs.brokerage_tiers
     )
     print(
-        f"Backtest {args.ticker} | {start} -> {end} | stratégie: SMA crossover {strategy.params} "
-        f"| rééquilibrage: {rebalance_freq}"
+        f"Backtest {args.ticker} | {start} -> {end} | stratégie: {display_name(args.strategy)} "
+        f"{strategy.params} | rééquilibrage: {rebalance_freq}"
     )
     print(
         f"Coûts : courtage [{tiers_desc}] + TTF {backtest_config.costs.ttf_pct:.2%} "
@@ -134,10 +156,11 @@ def main() -> None:
         strategy_pf, df["open"], backtest_config.costs, ttf_eligible, spread_pct,
         periods_per_year, risk_free_rate,
     )
+    friction_pct_display = format_friction_pct(full_strategy_metrics.friction_pct_of_gross_gain)
     print(
         f"Friction totale (stratégie, période complète) : "
         f"{full_strategy_metrics.friction_eur:,.2f}€ "
-        f"({full_strategy_metrics.friction_pct_of_gross_gain:.2%} du gain brut) | "
+        f"({friction_pct_display} du gain brut) | "
         f"Turnover annualisé : {full_strategy_metrics.turnover_annualized:.2f}x"
     )
 
@@ -159,6 +182,19 @@ def main() -> None:
             print(f"\nExporté vers {args.output_csv}")
     else:
         split_date = args.split_date
+        min_bars = backtest_config.min_bars_per_period
+        split_ts = pd.Timestamp(split_date)
+        n_bars_is = int((df.index < split_ts).sum())
+        n_bars_oos = int((df.index >= split_ts).sum())
+        if n_bars_is < min_bars or n_bars_oos < min_bars:
+            print(
+                "\n/!\\ PÉRIODE INSUFFISANTE : ce résultat n'est PAS une vérification "
+                "valable, juste de l'exploration. In-sample : "
+                f"{n_bars_is} séances (minimum {min_bars}) | Out-of-sample : "
+                f"{n_bars_oos} séances (minimum {min_bars}). En dessous de ce seuil, "
+                "un seul mouvement de marché suffit à décider du résultat.\n"
+            )
+
         strategy_equity_is, strategy_trades_is, strategy_equity_oos, strategy_trades_oos = (
             split_portfolio_by_date(strategy_pf, split_date)
         )

@@ -214,3 +214,136 @@ def test_cli_with_split_date_prints_is_and_oos_tables_and_writes_two_csvs(
     oos_df = pd.read_csv(oos_path)
     assert set(is_df["metric"]) >= {"cagr", "sharpe_ratio"}
     assert set(oos_df["metric"]) >= {"cagr", "sharpe_ratio"}
+
+
+def test_cli_strategy_momentum_runs_end_to_end_and_shows_effective_strategy_name(
+    workspace, monkeypatch, capsys, tmp_path
+):
+    momentum_config_path = tmp_path / "momentum_12_1.yaml"
+    momentum_config_path.write_text("lookback_days: 20\nskip_days: 5\n", encoding="utf-8")
+
+    argv = [
+        "prog",
+        "--ticker",
+        "AI.PA",
+        "--data-config",
+        str(workspace["data_config"]),
+        "--backtest-config",
+        str(workspace["backtest_config"]),
+        "--strategy",
+        "momentum_12_1",
+        "--strategy-config",
+        str(momentum_config_path),
+        "--no-split",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "Momentum 12-1" in captured.out
+    assert "SMA crossover" not in captured.out
+    assert "lookback_days" in captured.out
+    assert "cagr" in captured.out
+
+
+def test_cli_friction_shows_na_not_nan_when_gross_gain_is_non_positive(
+    workspace, monkeypatch, capsys, tmp_path
+):
+    # lookback_days (252) dépasse la longueur de la série synthétique (120
+    # barres) : la stratégie reste flat sur toute la période -> gain net et
+    # friction nuls -> gain brut nul -> friction_pct_of_gross_gain est NaN.
+    momentum_config_path = tmp_path / "momentum_12_1_never_invests.yaml"
+    momentum_config_path.write_text("lookback_days: 252\nskip_days: 21\n", encoding="utf-8")
+
+    argv = [
+        "prog",
+        "--ticker",
+        "AI.PA",
+        "--data-config",
+        str(workspace["data_config"]),
+        "--backtest-config",
+        str(workspace["backtest_config"]),
+        "--strategy",
+        "momentum_12_1",
+        "--strategy-config",
+        str(momentum_config_path),
+        "--no-split",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "n/a" in captured.out
+    assert "nan" not in captured.out.lower()
+
+
+def test_cli_prints_insufficient_period_warning_when_a_side_is_too_short(
+    workspace, monkeypatch, capsys
+):
+    # backtest_config.yaml du workspace n'a pas de min_bars_per_period ->
+    # défaut 500 ; la série synthétique (120 barres) ne peut pas fournir
+    # 500 barres d'aucun côté d'un split au milieu de la période.
+    argv = [
+        "prog",
+        "--ticker",
+        "AI.PA",
+        "--data-config",
+        str(workspace["data_config"]),
+        "--backtest-config",
+        str(workspace["backtest_config"]),
+        "--strategy-config",
+        str(workspace["strategy_config"]),
+        "--split-date",
+        "2023-06-01",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "PÉRIODE INSUFFISANTE" in captured.out
+
+
+def test_cli_does_not_print_insufficient_period_warning_when_both_sides_are_sufficient(
+    workspace, monkeypatch, capsys, tmp_path
+):
+    lenient_backtest_config_path = tmp_path / "backtest_lenient.yaml"
+    lenient_backtest_config_path.write_text(
+        """
+initial_capital: 10000.0
+trading_days_per_year: 252
+risk_free_rate: 0.0
+min_bars_per_period: 5
+costs:
+  brokerage_tiers:
+    - max_order_value: 500.0
+      fixed_fee: 1.99
+    - max_order_value: null
+      pct_fee: 0.006
+  ttf_pct: 0.004
+  base_slippage_pct: 0.0005
+""",
+        encoding="utf-8",
+    )
+
+    argv = [
+        "prog",
+        "--ticker",
+        "AI.PA",
+        "--data-config",
+        str(workspace["data_config"]),
+        "--backtest-config",
+        str(lenient_backtest_config_path),
+        "--strategy-config",
+        str(workspace["strategy_config"]),
+        "--split-date",
+        "2023-06-01",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "PÉRIODE INSUFFISANTE" not in captured.out

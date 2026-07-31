@@ -31,9 +31,28 @@ _EUR_METRICS = frozenset({"friction_eur"})
 
 _HEADERS = ("Métrique", "Stratégie", "Buy & Hold", "Écart")
 
+#: Au-delà de ce ratio (1000%), friction_pct_of_gross_gain est mathémati-
+#: quement correct mais n'a plus rien à dire : le gain brut est trop
+#: proche de zéro pour que "part du gain" reste un concept lisible. Rendu
+#: "n/s" plutôt qu'un chiffre à 5 chiffres qui décrédibilise le rapport.
+_FRICTION_PCT_NOT_SIGNIFICANT_THRESHOLD = 10.0
+
+
+def format_friction_pct(value: float) -> str:
+    """Formate `friction_pct_of_gross_gain` : "n/a" (non calculable, gain
+    brut non positif), "n/s" (calculable mais non significatif, ratio >
+    1000%), sinon un pourcentage classique."""
+    if isinstance(value, float) and math.isnan(value):
+        return "n/a"
+    if value > _FRICTION_PCT_NOT_SIGNIFICANT_THRESHOLD:
+        return "n/s"
+    return f"{value:.2%}"
+
 
 def _format_value(metric: str, value: float) -> str:
     """Formate une valeur de métrique pour l'affichage, selon son type."""
+    if metric == "friction_pct_of_gross_gain":
+        return format_friction_pct(value)
     if isinstance(value, float) and math.isnan(value):
         return "n/a"
     if metric in _PERCENT_METRICS:
@@ -86,7 +105,13 @@ def format_comparison_table(rows: list[ComparisonRow]) -> str:
     return _render_table(_HEADERS, formatted_rows)
 
 
-_BATCH_HEADERS = ("Ticker", "Nom", "CAGR strat. (OOS)", "CAGR B&H (OOS)", "Écart", "Friction %", "Verdict")
+#: Verdicts pour lesquels les colonnes de performance n'ont pas de sens
+#: (échec technique, ou période trop courte pour juger) : affichées en
+#: "n/a" plutôt que comme des chiffres calculés sur des données absentes
+#: ou insuffisantes.
+_NO_PERFORMANCE_VERDICTS = frozenset({"ERREUR", "NON TESTABLE"})
+
+_BATCH_HEADERS = ("Ticker", "Nom", "CAGR strat. (OOS)", "CAGR B&H (OOS)", "Écart", "Friction %", "Verdict", "Motif")
 
 
 def format_batch_table(results: list["BatchResult"]) -> str:
@@ -100,9 +125,14 @@ def format_batch_table(results: list["BatchResult"]) -> str:
     """
 
     def _pct_or_error(value: float, verdict: str) -> str:
-        if verdict == "ERREUR":
+        if verdict in _NO_PERFORMANCE_VERDICTS:
             return "n/a"
         return "n/a" if math.isnan(value) else f"{value:.2%}"
+
+    def _friction_pct_or_error(value: float, verdict: str) -> str:
+        if verdict in _NO_PERFORMANCE_VERDICTS:
+            return "n/a"
+        return format_friction_pct(value)
 
     formatted_rows = [
         (
@@ -111,8 +141,9 @@ def format_batch_table(results: list["BatchResult"]) -> str:
             _pct_or_error(r.strategy_cagr_oos, r.verdict),
             _pct_or_error(r.benchmark_cagr_oos, r.verdict),
             _pct_or_error(r.delta, r.verdict),
-            _pct_or_error(r.friction_pct_oos, r.verdict),
+            _friction_pct_or_error(r.friction_pct_oos, r.verdict),
             r.verdict,
+            r.error or "",
         )
         for r in results
     ]

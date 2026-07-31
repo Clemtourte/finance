@@ -144,6 +144,23 @@ Pour tourner sans découpage (déconseillé hors exploration rapide), passer
 `--no-split` explicitement : la sortie l'indique alors clairement en tête
 de rapport.
 
+### Garde-fou : période trop courte pour juger
+
+`SURVIT` et `REJETÉ` (voir plus bas) signifient tous deux « la
+comparaison in-sample/out-of-sample a été faite ». Si l'in-sample ou
+l'out-of-sample compte moins de `min_bars_per_period` séances
+(`config/backtest.yaml`, défaut `500` ~ 2 ans), un seul mouvement de
+marché isolé suffit à décider du résultat — ce n'est pas une
+vérification, et un ticker qui a par exemple commencé à coter après la
+date de coupure a un in-sample vide sans que rien ne le signale
+autrement.
+
+Le CLI mono-ticker (`--split-date`) reste un outil d'exploration : il
+affiche un avertissement visible en tête de rapport, avant les tableaux,
+quand l'un des deux côtés est sous le seuil, mais ne bloque pas
+l'exécution. Le batch sur univers (`src.engine.batch`, voir plus bas),
+lui, refuse de trancher : le verdict devient `NON TESTABLE`.
+
 ## Friction (courtage + TTF + spread)
 
 Le CLI affiche, en tête de rapport, la friction cumulée de la stratégie
@@ -162,7 +179,12 @@ caché). Une position encore ouverte (buy & hold jamais soldé) a bien payé
 sa friction d'entrée, comptée ; aucune friction de sortie fictive ne lui
 est imputée. `friction_pct_of_gross_gain` vaut `n/a` quand le gain brut
 (gain net + friction) n'est pas positif — le concept de "part du gain"
-n'a alors pas de sens.
+n'a alors pas de sens. Quand le gain brut est positif mais minuscule, le
+ratio est calculable mais explose (plusieurs milliers de %) sans rien
+dire de la réalité économique de la friction : au-delà de 1000%,
+l'affichage (console uniquement, la valeur brute reste dans les CSV
+exportés) passe à `n/s` plutôt que d'afficher un nombre à 5 chiffres qui
+décrédibilise le rapport.
 
 Le CLI résout `ttf`/`spread_pct` du ticker demandé depuis
 `config/universe_cac40.yaml` (ou `--universe-file`) ; un ticker absent de
@@ -183,12 +205,31 @@ Comme le CLI mono-ticker, `--split-date` est obligatoire (pas de
 `--no-split` ici : le verdict n'a de sens que sur l'out-of-sample). Pour
 chaque ticker : CAGR net de la stratégie et du buy & hold sur
 l'out-of-sample, écart, friction en % du gain brut, et un verdict —
-**`SURVIT`** si la stratégie bat le buy & hold net de coûts sur
-l'out-of-sample, **`REJETÉ`** sinon (y compris quand la comparaison est
-indéfinie : posture prudente, cohérente avec l'objectif de falsification
-du projet). Un ticker non encore ingéré (ou dont le backtest échoue pour
-toute autre raison) est reporté **`ERREUR`** sans interrompre le run —
-utile pour lancer le batch avant d'avoir ingéré tout l'univers.
+**`SURVIT`** si la stratégie bat le buy & hold net de coûts **et** affiche
+elle-même un CAGR strictement positif sur l'out-of-sample, **`REJETÉ`**
+sinon (y compris quand la comparaison est indéfinie : posture prudente,
+cohérente avec l'objectif de falsification du projet). Un ticker non
+encore ingéré (ou dont le backtest échoue pour toute autre raison) est
+reporté **`ERREUR`** sans interrompre le run — utile pour lancer le batch
+avant d'avoir ingéré tout l'univers.
+
+La seconde condition de `SURVIT` (CAGR strictement positif) n'est pas
+redondante avec la première : sur un titre en forte baisse, toute règle
+qui passe du temps hors marché bat mécaniquement un buy & hold qui
+s'effondre, sans que la stratégie ait généré le moindre gain — battre une
+référence qui s'effondre n'est pas une performance, c'est une absence.
+Quand la stratégie bat le buy & hold mais reste elle-même perdante,
+`REJETÉ` (pas un cinquième verdict) avec le motif dans la colonne `Motif`,
+ex. `Bat le buy & hold (-28.3%/an) mais perd de l'argent (-0.2%/an)`. Ce
+garde-fou, comme le verdict lui-même, ne porte que sur l'out-of-sample.
+
+Un ticker dont l'in-sample ou l'out-of-sample compte moins de
+`min_bars_per_period` séances (voir « Garde-fou : période trop courte
+pour juger » ci-dessus) est reporté **`NON TESTABLE`** — jamais `SURVIT`
+ni `REJETÉ` — avec la raison dans la colonne `Motif` (quel côté, combien
+de séances sur combien exigées) ; les colonnes de performance affichent
+`n/a`. La ligne de synthèse compte les quatre verdicts séparément
+(`SURVIT: … | REJETÉ: … | NON TESTABLE: … | ERREUR: …`).
 
 ## Installation
 

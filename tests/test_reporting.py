@@ -13,6 +13,7 @@ from src.reporting.table import (
     export_comparison_csv,
     format_batch_table,
     format_comparison_table,
+    format_friction_pct,
 )
 
 
@@ -63,6 +64,28 @@ def test_format_comparison_table_formats_turnover_and_friction():
     assert "1.25x" in table  # turnover_annualized stratégie
     assert "123.46€" in table  # friction_eur stratégie
     assert "15.00%" in table  # friction_pct_of_gross_gain stratégie
+
+
+def test_format_friction_pct_shows_ns_above_threshold():
+    assert format_friction_pct(204.0582) == "n/s"  # 20405.82%, gain brut minuscule
+
+
+def test_format_friction_pct_shows_percentage_at_and_below_threshold():
+    assert format_friction_pct(10.0) == "1000.00%"  # pile au seuil : pas encore "n/s"
+    assert format_friction_pct(0.15) == "15.00%"
+
+
+def test_format_friction_pct_shows_na_for_nan():
+    assert format_friction_pct(float("nan")) == "n/a"
+
+
+def test_format_comparison_table_shows_ns_for_absurd_friction_ratio():
+    rows = [
+        ComparisonRow(metric="friction_pct_of_gross_gain", strategy=204.0582, buy_and_hold=0.01, delta=204.0482),
+    ]
+    table = format_comparison_table(rows)
+    assert "n/s" in table
+    assert "20405.82%" not in table
 
 
 def test_format_comparison_table_has_header_and_separator():
@@ -124,6 +147,18 @@ def test_format_batch_table_shows_na_for_error_rows():
     assert len(lines) == 1
     assert "n/a" in lines[0]
     assert "nan" not in lines[0]
+
+
+def test_format_batch_table_shows_ns_for_absurd_friction_ratio():
+    results = [
+        BatchResult(
+            ticker="DG.PA", name="Vinci", strategy_cagr_oos=0.001, benchmark_cagr_oos=0.0005,
+            delta=0.0005, friction_pct_oos=204.0582, verdict="SURVIT",
+        ),
+    ]
+    table = format_batch_table(results)
+    assert "n/s" in table
+    assert "20405.82%" not in table
 
 
 def test_export_batch_csv_roundtrip(tmp_path):

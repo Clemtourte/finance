@@ -18,6 +18,7 @@ class BacktestConfig:
     trading_days_per_year: int
     risk_free_rate: float
     rebalance_freq: str
+    min_bars_per_period: int
     costs: CostConfig
 
 
@@ -53,5 +54,6 @@ def load_backtest_config(path: str | Path) -> BacktestConfig:
         trading_days_per_year=raw["trading_days_per_year"],
         risk_free_rate=raw["risk_free_rate"],
         rebalance_freq=raw.get("rebalance_freq", "daily"),
+        min_bars_per_period=raw.get("min_bars_per_period", 500),
         costs=costs,
     )

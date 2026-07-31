@@ -1,6 +1,6 @@
 # Paramètres de la couche données (ingestion, cache, validation, DuckDB).
 
-universe_file: config/universe_cac40.yaml
+universe_file: config/universe_perso.yaml
 
 period:
   # Format ISO (YYYY-MM-DD). "today" est résolu dynamiquement à l'exécution.

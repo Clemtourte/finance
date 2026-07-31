@@ -20,6 +20,14 @@ risk_free_rate: 0.0
 # échantillonnée (voir src/engine/backtest.py:resample_target_position).
 rebalance_freq: daily
 
+# Nombre minimum de séances exigé DE CHAQUE CÔTÉ de la date de coupure
+# in-sample/out-of-sample (500 séances ~ 2 ans à 252 séances/an) pour
+# qu'un verdict SURVIT/REJETÉ ait un sens. En dessous, un seul mouvement
+# de marché (un krach, un rallye) suffit à décider du résultat : ce
+# n'est pas une vérification, c'est un coup de dés. Voir
+# src/engine/batch.py (verdict "NON TESTABLE").
+min_bars_per_period: 500
+
 costs:
   # Grille de courtage BoursoBank (ordre "Découverte", Euronext), par
   # paliers sur la valeur de l'ordre. À VÉRIFIER / AJUSTER selon la
