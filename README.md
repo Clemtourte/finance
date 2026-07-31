@@ -231,6 +231,68 @@ de séances sur combien exigées) ; les colonnes de performance affichent
 `n/a`. La ligne de synthèse compte les quatre verdicts séparément
 (`SURVIT: … | REJETÉ: … | NON TESTABLE: … | ERREUR: …`).
 
+## Rapport hebdomadaire (`make weekly` / `src.weekly`)
+
+Lancer l'ingestion puis le batch séparément produit une sortie qui
+disparaît à la fermeture du terminal. `make weekly` (`src.weekly`)
+enchaîne les deux (ingestion sur l'univers de `config/weekly.yaml`, puis
+le même batch que `make survey`) et écrit un rapport Markdown daté dans
+`reports/AAAA-MM-JJ.md`, exécutable à la main aujourd'hui et par un
+planificateur (cron) demain — voir SETUP.md pour l'usage courant et les
+codes de sortie.
+
+`src.weekly` n'implémente aucun calcul : c'est un pur orchestrateur qui
+appelle `src.data.ingest.run_ingestion`, `src.data.baseline` et
+`src.engine.batch.run_batch`, puis délègue le rendu à
+`src.reporting.weekly_report`.
+
+### Comparaison à l'exécution précédente
+
+Même principe que la ligne de base des anomalies (`config/
+known_anomalies.yaml`, voir plus haut) : un rapport identique chaque
+semaine cesse d'être lu, et le jour où quelque chose change réellement,
+personne ne le voit. Le rapport met donc en avant une section
+**"Changements"**, en tête, qui liste uniquement ce qui a changé depuis
+l'exécution précédente — le reste (données, tableau complet, pied de
+page) n'est que du matériel de référence.
+
+Pour savoir ce qui a changé, chaque exécution compare son résultat à
+`data/last_verdicts.json` (`state_file`), écrit par la précédente :
+
+- **verdict qui bascule** : un ticker dont le verdict diffère de celui
+  enregistré (`SURVIT` -> `REJETÉ`, mais aussi `NON TESTABLE` <->
+  testable, qui EST un changement — un ticker qui reste `NON TESTABLE`
+  d'une exécution à l'autre n'en est pas un) ;
+- **ticker apparu** : présent cette fois-ci, absent de l'état précédent
+  (ex. ajouté à l'univers) ;
+- **ticker disparu** : présent dans l'état précédent, absent cette
+  fois-ci (ex. retiré de l'univers) — signalé explicitement, jamais
+  simplement omis du rapport ;
+- **anomalie nouvelle** : au sens habituel de `src.data.baseline`
+  (absente de `config/known_anomalies.yaml`), indépendamment de
+  l'exécution précédente.
+
+Fichier absent (`data/last_verdicts.json` n'existe pas encore) =
+première exécution : ce n'est pas une erreur, le rapport le dit
+explicitement plutôt que de lister chaque ticker comme un faux
+"changement" (il n'y a encore rien à comparer). L'état écrit à cette
+occasion sert de référence à la prochaine exécution.
+
+### Pourquoi `split_date` est figée dans `config/weekly.yaml`
+
+Contrairement à `end_date: "today"` de `config/data.yaml` (qui avance
+volontairement à chaque exécution — c'est la fraîcheur des données),
+`split_date` ne bouge JAMAIS toute seule. Si elle avançait automatiquement
+(ex. "il y a 2 ans" recalculé chaque semaine), la fenêtre in-sample/
+out-of-sample changerait de taille et de contenu à chaque run pour une
+raison purement technique (le calendrier a tourné), pas parce que le
+marché a bougé. Un verdict qui bascule d'une semaine à l'autre — la seule
+chose que la section "Changements" est censée signaler comme
+significative — deviendrait alors illisible : impossible de savoir si
+c'est le marché ou la fenêtre de mesure qui vient de changer. `split_date`
+n'est donc avancée qu'à la main, consciemment, quand la fenêtre doit être
+recalée.
+
 ## Installation
 
 Prérequis : [uv](https://docs.astral.sh/uv/). `uv sync` télécharge
@@ -496,6 +558,7 @@ config/
   universe_cac40.yaml          # univers de tickers (CAC 40) + ttf/spread_pct
   universe_etf_pea.yaml        # univers d'ETF PEA (CW8/EWLD, PSP5, ETZ)
   backtest.yaml                # capital, coûts par paliers, TTF, glissement, rééquilibrage
+  weekly.yaml                  # univers/split_date (FIGÉE)/stratégie/chemins de `make weekly`
   strategies/
     sma_crossover.yaml         # référence
     momentum_12_1.yaml
@@ -533,6 +596,10 @@ src/
     comparison.py               # comparaison stratégie vs buy & hold, métrique par métrique
   reporting/
     table.py                   # tableau de comparaison + récapitulatif batch (console + CSV)
+    validation.py               # rendu texte des rapports de validation (détail + synthèse)
+    weekly_report.py            # rendu Markdown du rapport hebdomadaire (src.weekly)
+  weekly.py                    # CLI hebdomadaire (`python -m src.weekly`) : ingestion + batch +
+                                #   comparaison à l'exécution précédente + rapport daté
 tests/
   test_cache.py, test_validation.py, test_config.py, test_ingest.py
   test_indicators.py           # dont le test de non-look-ahead (le plus important)
@@ -540,7 +607,7 @@ tests/
   test_costs.py                # paliers de courtage, TTF, spread (fonctions pures)
   test_engine.py               # coûts, décalage d'exécution, rendement connu, rééquilibrage
   test_metrics.py, test_friction.py
-  test_reporting.py, test_cli.py, test_batch.py
+  test_reporting.py, test_cli.py, test_batch.py, test_weekly.py
 ```
 
 ## Pourquoi Python 3.12 (et pas 3.11 ou plus récent) ?

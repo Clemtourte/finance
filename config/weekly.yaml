@@ -1,0 +1,37 @@
+# Paramètres de la commande hebdomadaire (make weekly / src.weekly) :
+# ingestion + backtest sur le même univers, rapport daté, comparaison à
+# l'exécution précédente. Voir SETUP.md, section "make weekly", et
+# README.md pour la logique de comparaison.
+
+# Fichier d'univers à ingérer puis backtester (même format que
+# universe_file de config/data.yaml).
+universe_file: config/universe_perso.yaml
+
+# Date de coupure in-sample/out-of-sample, transmise telle quelle à
+# src.engine.batch à CHAQUE exécution.
+#
+# FIGÉE délibérément : si elle avançait automatiquement à chaque run
+# (ex. "il y a 2 ans" recalculé chaque semaine), la fenêtre in-sample/
+# out-of-sample changerait de taille et de contenu pour une raison
+# purement technique (le calendrier a tourné), pas parce que le marché a
+# bougé. Un verdict qui bascule d'une semaine à l'autre deviendrait alors
+# illisible : impossible de savoir si c'est le marché ou la fenêtre de
+# mesure qui a changé. À avancer à la main, consciemment, si la fenêtre
+# doit être recalée — voir README.md, section "Garde-fou : période trop
+# courte pour juger" et "Rapport hebdomadaire".
+split_date: 2022-01-01
+
+# Stratégie évaluée (nom court du registre, voir src/strategies/registry.py
+# et SETUP.md, section "Stratégies disponibles", pour la liste).
+strategy: momentum_12_1
+
+# Répertoire où chaque exécution écrit son rapport daté
+# (reports_dir/AAAA-MM-JJ.md). Produit, pas versionné (voir .gitignore).
+reports_dir: reports
+
+# Fichier où l'exécution courante enregistre le verdict de chaque ticker
+# (et les deux CAGR comparés), pour que la PROCHAINE exécution puisse
+# détecter ce qui a changé. Produit, pas versionné (voir .gitignore).
+# Absent au premier lancement : ce n'est pas une erreur, juste rien à
+# comparer — le rapport le dit explicitement.
+state_file: data/last_verdicts.json

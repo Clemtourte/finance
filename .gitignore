@@ -15,6 +15,13 @@ data/*.duckdb
 data/*.duckdb.wal
 data/*.csv
 
+# Sorties produites par make weekly (src.weekly) : rapports datés et état
+# de comparaison d'une exécution à l'autre. Fichiers générés, pas des
+# décisions humaines — contrairement à config/known_anomalies.yaml, qui
+# lui reste versionné (voir SETUP.md, section "Où éditer quoi").
+reports/
+data/last_verdicts.json
+
 # Tests / outils
 .pytest_cache/
 .ruff_cache/

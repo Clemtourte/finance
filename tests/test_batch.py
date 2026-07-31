@@ -166,6 +166,21 @@ def test_run_batch_flat_strategy_beating_crashing_benchmark_is_rejected_not_surv
     )
 
 
+def test_run_batch_strategy_cagr_of_exactly_zero_is_rejected_not_survit(workspace):
+    # Test dédié au seuil lui-même : la condition SURVIT est
+    # strategy_cagr_oos > 0, STRICTEMENT — 0% exact (ni gain ni perte)
+    # doit donc être REJETÉ, jamais SURVIT, même quand delta > 0.
+    universe = [TickerInfo(ticker="CRASH.PA", name="Crash", isin="XX0000000000")]
+    results = run_batch(
+        universe, _AlwaysFlatStrategy(), workspace["data_config"], workspace["backtest_config"],
+        workspace["split_date"],
+    )
+    result = results[0]
+    assert result.strategy_cagr_oos == pytest.approx(0.0, abs=1e-9)
+    assert result.delta > 0  # bat bien le buy & hold
+    assert result.verdict == "REJETÉ"  # ... mais 0% n'est pas strictement > 0
+
+
 def test_run_batch_survit_requires_a_genuine_gain_not_just_beating_the_benchmark(workspace):
     # Stratégie scriptée : sort avant le creux de RECOVER.PA, rachète
     # dedans, termine avec un gain réel plus élevé que le buy & hold.
