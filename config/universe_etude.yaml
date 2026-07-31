@@ -1,0 +1,20 @@
+# Univers d'ÉTUDE : titres analysés mais NON DÉTENUS.
+#
+# À ne jamais confondre avec config/universe_perso.yaml, qui contient les
+# lignes réellement en portefeuille.
+#
+# CW8 sert de terrain d'essai pour DCAM (Amundi PEA Monde), qui n'a que
+# 359 séances depuis mars 2025 et ne peut donc pas être testé.
+# Même émetteur, même indice, même devise, revenus réinvestis dans les
+# deux cas, 17 ans d'historique contre 1,4 an.
+#
+# LIMITE : un résultat obtenu sur CW8 décrit le comportement de la
+# stratégie face à un indice mondial. Il ne se transpose PAS tel quel à
+# DCAM : frais annuels et méthode de réplication diffèrent.
+
+tickers:
+  - ticker: CW8.PA
+    name: "Amundi MSCI World Swap UCITS ETF EUR Acc (CW8)"
+    isin: LU1681043599
+    ttf: false
+    spread_pct: 0.0005
