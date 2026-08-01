@@ -2,9 +2,11 @@
 
 Structure imposée : titre daté, puis "Changements" en tête — la SEULE
 section lue une semaine normale, qui liste uniquement ce qui a changé
-depuis l'exécution précédente (anomalies nouvelles, verdicts qui
-basculent, tickers apparus/disparus) — puis "Données", "Résultats" et un
-pied de page, qui ne sont que du matériel de référence.
+depuis l'exécution précédente (anomalies vues pour la première fois,
+verdicts qui basculent, tickers apparus/disparus) — puis "Données", "En
+attente d'examen" (anomalies déjà signalées mais pas encore expliquées,
+qui ne redéclenchent plus le code de sortie 1), "Résultats" et un pied
+de page, qui ne sont que du matériel de référence.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
     # Import différé (type-checking uniquement) pour éviter un cycle avec
     # src.weekly, qui importe ce module pour produire son rapport.
     from src.engine.batch import BatchResult
-    from src.weekly import WeeklyChanges
+    from src.weekly import PendingAnomaly, WeeklyChanges
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class WeeklyReportContext:
     run_date: date
     changes: "WeeklyChanges"
     new_anomaly_reports: dict[str, ValidationReport]
+    pending_anomalies: list["PendingAnomaly"]
     n_tickers: int
     bars_added: dict[str, int]
     n_known_discarded: int
@@ -42,6 +45,13 @@ class WeeklyReportContext:
     strategy_name: str
     data_start: date
     data_end: date
+    forced: bool = False
+
+
+def _since(previous_run_date: date | None) -> str:
+    if previous_run_date is not None:
+        return f"depuis le {previous_run_date.isoformat()}"
+    return "depuis la dernière exécution"
 
 
 def _render_changes_section(ctx: WeeklyReportContext) -> str:
@@ -52,22 +62,28 @@ def _render_changes_section(ctx: WeeklyReportContext) -> str:
             "— le prochain rapport pourra dire ce qui a changé."
         )
 
-    if not ctx.new_anomaly_reports and not ctx.changes.has_verdict_activity and not ctx.changes.is_first_run:
-        if ctx.changes.previous_run_date is not None:
-            return f"Rien de nouveau depuis le {ctx.changes.previous_run_date.isoformat()}."
-        return "Rien de nouveau depuis la dernière exécution."
-
     parts: list[str] = []
     if ctx.changes.is_first_run:
         parts.append(
             "Première exécution : aucun état antérieur pour comparer les verdicts "
             "(l'état de référence vient d'être écrit)."
         )
+
+    since = _since(ctx.changes.previous_run_date)
+
+    # Ces deux sujets se prononcent TOUJOURS explicitement (une ligne de
+    # confirmation s'il n'y a rien de neuf) : un rapport qui reste
+    # silencieux sur un sujet ne se distingue pas d'un rapport qui a
+    # oublié de le vérifier. Seulement au premier run (pas de date de
+    # référence à citer) ces confirmations n'ont pas de sens et sont omises.
     if ctx.new_anomaly_reports:
         lines = ["**Anomalies nouvelles** (absentes de la ligne de base) :", "", "```"]
         lines.extend(format_validation_report(report, filtered=True) for report in ctx.new_anomaly_reports.values())
         lines.append("```")
         parts.append("\n".join(lines))
+    elif not ctx.changes.is_first_run:
+        parts.append(f"Aucune anomalie nouvelle {since}.")
+
     if ctx.changes.verdict_changes:
         lines = ["**Changements de verdict :**"]
         lines.extend(
@@ -75,6 +91,9 @@ def _render_changes_section(ctx: WeeklyReportContext) -> str:
             for c in ctx.changes.verdict_changes
         )
         parts.append("\n".join(lines))
+    elif not ctx.changes.is_first_run:
+        parts.append(f"Aucun changement de verdict {since}.")
+
     if ctx.changes.appeared:
         lines = ["**Nouveaux tickers dans l'univers :**"]
         lines.extend(f"- `{ticker}`" for ticker in ctx.changes.appeared)
@@ -83,21 +102,42 @@ def _render_changes_section(ctx: WeeklyReportContext) -> str:
         lines = ["**Tickers disparus de l'univers :**"]
         lines.extend(f"- `{ticker}`" for ticker in ctx.changes.disappeared)
         parts.append("\n".join(lines))
+
+    if ctx.pending_anomalies:
+        n = len(ctx.pending_anomalies)
+        wording = "1 anomalie reste" if n == 1 else f"{n} anomalies restent"
+        parts.append(f"{wording} en attente d'examen, voir plus bas.")
+
     return "\n\n".join(parts)
 
 
 def _render_data_section(ctx: WeeklyReportContext) -> str:
     added = {ticker: n for ticker, n in ctx.bars_added.items() if n > 0}
-    if added:
-        added_desc = ", ".join(f"{ticker}: +{n}" for ticker, n in sorted(added.items()))
-    else:
-        added_desc = "aucune (tous les titres étaient déjà à jour)"
     total_added = sum(ctx.bars_added.values())
+    if total_added == 0:
+        added_line = "Séances ajoutées : aucune (tous les titres étaient déjà à jour)"
+    else:
+        detail = ", ".join(f"{ticker}: +{n}" for ticker, n in sorted(added.items()))
+        added_line = f"Séances ajoutées : {total_added} au total ({detail})"
     return (
         f"- Titres : {ctx.n_tickers}\n"
-        f"- Séances ajoutées : {total_added} au total ({added_desc})\n"
+        f"- {added_line}\n"
         f"- Anomalies connues écartées (ligne de base) : {ctx.n_known_discarded}"
     )
+
+
+def _render_pending_section(ctx: WeeklyReportContext) -> str:
+    if not ctx.pending_anomalies:
+        return "Aucune anomalie en attente d'examen."
+    lines = []
+    for p in sorted(ctx.pending_anomalies, key=lambda p: (p.ticker, p.date, p.kind)):
+        day_word = "jour" if p.days_waiting == 1 else "jours"
+        lines.append(
+            f"- `{p.ticker}` ({p.kind}, {p.date.isoformat()}) : vue pour la première fois "
+            f"le {p.first_seen.isoformat()}, en attente depuis {p.days_waiting} {day_word} — "
+            "à expliquer dans config/known_anomalies.yaml ou à laisser réapparaître si ce n'en est pas une."
+        )
+    return "\n".join(lines)
 
 
 def _render_results_section(ctx: WeeklyReportContext) -> str:
@@ -114,13 +154,19 @@ def _render_results_section(ctx: WeeklyReportContext) -> str:
 
 
 def _render_footer_section(ctx: WeeklyReportContext) -> str:
-    return (
-        f"- Durée d'exécution : {ctx.elapsed_seconds:.1f}s\n"
-        f"- Univers : {ctx.universe_file}\n"
-        f"- Date de coupure (in-sample/out-of-sample) : {ctx.split_date.isoformat()}\n"
-        f"- Stratégie : {ctx.strategy_name}\n"
-        f"- Données utilisées : {ctx.data_start.isoformat()} → {ctx.data_end.isoformat()}"
-    )
+    lines = [
+        f"- Durée d'exécution : {ctx.elapsed_seconds:.1f}s",
+        f"- Univers : {ctx.universe_file}",
+        f"- Date de coupure (in-sample/out-of-sample) : {ctx.split_date.isoformat()}",
+        f"- Stratégie : {ctx.strategy_name}",
+        f"- Données utilisées : {ctx.data_start.isoformat()} → {ctx.data_end.isoformat()}",
+    ]
+    if ctx.forced:
+        lines.append(
+            "- Exécution FORCÉE (--force) : contrôle d'espacement minimal entre "
+            "exécutions contourné, voir min_days_between_runs (config/weekly.yaml)"
+        )
+    return "\n".join(lines)
 
 
 def render_weekly_report(ctx: WeeklyReportContext) -> str:
@@ -133,12 +179,13 @@ def render_weekly_report(ctx: WeeklyReportContext) -> str:
         Texte Markdown complet, prêt à être écrit dans
         `reports_dir/AAAA-MM-JJ.md`. Ordre des sections imposé : titre
         daté, "Changements" (seule section lue une semaine normale),
-        "Données", "Résultats", pied de page.
+        "Données", "En attente d'examen", "Résultats", pied de page.
     """
     return (
         f"# Rapport hebdomadaire — {ctx.run_date.isoformat()}\n\n"
         f"## Changements\n\n{_render_changes_section(ctx)}\n\n"
         f"## Données\n\n{_render_data_section(ctx)}\n\n"
+        f"## En attente d'examen\n\n{_render_pending_section(ctx)}\n\n"
         f"## Résultats\n\n{_render_results_section(ctx)}\n\n"
         f"## Pied de page\n\n{_render_footer_section(ctx)}\n"
     )

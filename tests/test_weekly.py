@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
@@ -68,11 +68,21 @@ class _ContinuousProvider(DataProvider):
         )
 
 
+_ANOMALY_SHOCK_INDEX = 5
+
+
 @dataclass
 class _AnomalousProvider(FakeProvider):
-    """Injecte un choc de prix déterministe (voir `test_ingest._AnomalousFakeYFinanceProvider`)."""
+    """Injecte un choc de prix déterministe (voir `test_ingest._AnomalousFakeYFinanceProvider`).
 
-    shock_index: int = 5
+    Comme `FakeProvider`, dont les prix dépendent de la longueur de la
+    plage demandée : sûr à réutiliser sur plusieurs exécutions
+    hebdomadaires TANT QUE `end_date` ne change pas d'un run à l'autre
+    (aucune nouvelle plage n'est alors demandée au provider, voir
+    `_ContinuousProvider` sinon).
+    """
+
+    shock_index: int = _ANOMALY_SHOCK_INDEX
     shock_multiplier: float = 2.2
 
     def get_ohlcv(self, ticker, start, end):
@@ -181,14 +191,15 @@ def test_first_run_writes_report_mentioning_first_run_not_fake_changes(workspace
     assert expected_path.read_text(encoding="utf-8") == result.report_text
 
     state = load_weekly_state(workspace["weekly_config"].state_file)
-    assert set(state) == {"AAA.PA", "BBB.PA"}
-    assert state["AAA.PA"].verdict == "NON TESTABLE"
+    assert set(state.tickers) == {"AAA.PA", "BBB.PA"}
+    assert state.tickers["AAA.PA"].verdict == "NON TESTABLE"
+    assert state.anomalies == {}
 
 
 # --- Deuxième exécution identique ---------------------------------------------
 
 
-def test_second_identical_run_exits_0_with_no_changes(workspace):
+def test_second_identical_run_exits_0_with_both_confirmation_lines(workspace):
     end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
     data_config = workspace["make_data_config"](end_date)
 
@@ -206,7 +217,10 @@ def test_second_identical_run_exits_0_with_no_changes(workspace):
     assert result.changes.verdict_changes == []
     assert result.changes.appeared == []
     assert result.changes.disappeared == []
-    assert "Rien de nouveau depuis le 2024-06-01" in result.report_text
+    # Les deux sujets se prononcent explicitement, pas une seule ligne
+    # générique : rien à comparer ne doit pas se lire comme "pas vérifié".
+    assert "Aucune anomalie nouvelle depuis le 2024-06-01." in result.report_text
+    assert "Aucun changement de verdict depuis le 2024-06-01." in result.report_text
 
 
 # --- Un verdict qui bascule -----------------------------------------------------
@@ -231,7 +245,11 @@ def test_verdict_flip_exits_1_and_names_ticker_with_old_and_new_verdict(workspac
         run_date=date(2024, 6, 8),
     )
 
+    # Le changement de verdict seul déclenche le code 1, sans aucune
+    # anomalie nouvelle ou en attente dans ce scénario.
     assert result.exit_code == 1
+    assert result.new_anomaly_reports == {}
+    assert result.pending_anomalies == []
     changed_tickers = {c.ticker: (c.old_verdict, c.new_verdict) for c in result.changes.verdict_changes}
     assert changed_tickers["AAA.PA"] == ("NON TESTABLE", "REJETÉ")
     assert changed_tickers["BBB.PA"] == ("NON TESTABLE", "REJETÉ")
@@ -241,7 +259,7 @@ def test_verdict_flip_exits_1_and_names_ticker_with_old_and_new_verdict(workspac
     assert "Changements de verdict" in result.report_text
 
 
-# --- Une anomalie nouvelle -------------------------------------------------------
+# --- Une anomalie nouvelle, puis en attente, puis expliquée --------------------
 
 
 def test_new_anomaly_exits_1(workspace):
@@ -255,7 +273,124 @@ def test_new_anomaly_exits_1(workspace):
 
     assert result.exit_code == 1
     assert result.new_anomaly_reports  # au moins un ticker avec anomalie nouvelle
+    assert result.pending_anomalies == []  # rien à avoir vu avant cette exécution
     assert "Anomalies nouvelles" in result.report_text
+
+
+def test_same_anomaly_next_run_is_pending_not_new_and_exits_0(workspace):
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+
+    r1 = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=_AnomalousProvider(), run_date=date(2024, 6, 1),
+    )
+    assert r1.exit_code == 1
+
+    # Même end_date -> aucune nouvelle plage à (re)demander au provider :
+    # les mêmes données (donc la même anomalie, à la même date) sont
+    # simplement re-détectées depuis le cache.
+    r2 = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=_AnomalousProvider(), run_date=date(2024, 6, 8),
+    )
+
+    assert r2.exit_code == 0  # en attente, pas nouvelle : ne redéclenche pas le code 1
+    assert r2.new_anomaly_reports == {}
+    assert r2.pending_anomalies
+    assert "Anomalies nouvelles" not in r2.report_text
+    assert "En attente d'examen" in r2.report_text
+
+    pending_aaa = next(p for p in r2.pending_anomalies if p.ticker == "AAA.PA")
+    assert pending_aaa.first_seen == date(2024, 6, 1)
+    assert pending_aaa.days_waiting == 7  # 2024-06-01 -> 2024-06-08
+    assert "AAA.PA" in r2.report_text
+    assert "en attente depuis 7 jour" in r2.report_text
+
+
+def test_pending_anomaly_added_to_baseline_disappears_from_both_sections(workspace):
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+
+    run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=_AnomalousProvider(), run_date=date(2024, 6, 1),
+    )
+    run_weekly(  # devient "en attente"
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=_AnomalousProvider(), run_date=date(2024, 6, 8),
+    )
+
+    anomaly_date = pd.bdate_range(start=_START_DATE, end=end_date)[_ANOMALY_SHOCK_INDEX].date()
+    workspace["known_anomalies"].write_text(
+        f"""
+anomalies:
+  - ticker: AAA.PA
+    kind: outlier
+    date: {anomaly_date.isoformat()}
+    note: "Expliquée."
+  - ticker: BBB.PA
+    kind: outlier
+    date: {anomaly_date.isoformat()}
+    note: "Expliquée."
+""",
+        encoding="utf-8",
+    )
+
+    result = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=_AnomalousProvider(), run_date=date(2024, 6, 15),
+    )
+
+    assert result.exit_code == 0
+    assert result.new_anomaly_reports == {}
+    assert result.pending_anomalies == []
+    assert "Anomalies nouvelles" not in result.report_text
+    assert "Aucune anomalie en attente d'examen." in result.report_text
+
+    state = load_weekly_state(workspace["weekly_config"].state_file)
+    assert state.anomalies == {}
+
+
+def test_old_format_state_file_loads_without_error_and_anomaly_is_treated_as_new(workspace):
+    import json
+
+    state_path = workspace["weekly_config"].state_file
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "tickers": {
+                    "AAA.PA": {
+                        "verdict": "NON TESTABLE", "run_date": "2024-05-01",
+                        "strategy_cagr_oos": None, "benchmark_cagr_oos": None,
+                    },
+                    "BBB.PA": {
+                        "verdict": "NON TESTABLE", "run_date": "2024-05-01",
+                        "strategy_cagr_oos": None, "benchmark_cagr_oos": None,
+                    },
+                }
+                # Pas de clé "anomalies" : format d'avant cette fonctionnalité.
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_weekly_state(state_path)  # ne lève pas
+    assert state.anomalies == {}
+    assert set(state.tickers) == {"AAA.PA", "BBB.PA"}
+
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+    result = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=_AnomalousProvider(), run_date=date(2024, 6, 1),
+    )
+
+    assert result.exit_code == 1
+    assert result.new_anomaly_reports  # absente de l'état -> vue pour la 1re fois, pas une erreur
+    assert result.pending_anomalies == []
+    assert result.changes.verdict_changes == []  # verdict inchangé, isolé de l'effet anomalie
 
 
 # --- Un ticker retiré de l'univers ------------------------------------------------
@@ -405,3 +540,119 @@ def test_main_succeeds_and_writes_report_on_first_run(weekly_cli_workspace, monk
     captured = capsys.readouterr()
     assert "Rapport :" in captured.out
     assert len(captured.out.strip().splitlines()) <= 3
+
+
+# --- Refus d'exécution trop rapprochée de la précédente (min_days_between_runs) ---
+
+
+def test_run_same_day_as_previous_is_refused_without_report_write_or_provider_calls(workspace):
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+    run_date = date(2024, 6, 1)
+
+    run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=run_date,
+    )
+    report_path = workspace["weekly_config"].reports_dir / "2024-06-01.md"
+    assert report_path.exists()
+    report_path.unlink()  # supprimé pour distinguer "réécrit" de "jamais réécrit" ci-dessous
+    state_before = workspace["weekly_config"].state_file.read_text(encoding="utf-8")
+
+    provider = FakeProvider()
+    result = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=provider, run_date=run_date,
+    )
+
+    assert result.exit_code == 0
+    assert result.skipped is True
+    assert provider.calls == []  # aucun appel au provider -> aucun accès réseau
+    assert not report_path.exists()  # le refus n'a rien écrit
+    assert workspace["weekly_config"].state_file.read_text(encoding="utf-8") == state_before
+    # Le message cite la date de la dernière exécution et celle de la prochaine acceptée
+    # (min_days_between_runs=5, défaut de WeeklyConfig -> 2024-06-01 + 5j).
+    assert "2024-06-01" in result.skip_message
+    assert "2024-06-06" in result.skip_message
+
+
+def test_run_ten_days_after_previous_executes_normally(workspace):
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+
+    run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=date(2024, 6, 1),
+    )
+    result = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=date(2024, 6, 11),  # 10 jours plus tard
+    )
+
+    assert result.skipped is False
+    assert result.report_path.exists()
+    # La pipeline complète a bien tourné (pas juste "pas refusée") : l'état
+    # a été réécrit avec la nouvelle date d'exécution.
+    state = load_weekly_state(workspace["weekly_config"].state_file)
+    assert state.last_run_date == date(2024, 6, 11)
+
+
+def test_run_exactly_min_days_after_previous_executes_normally(workspace):
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+    run_date = date(2024, 6, 1)
+    min_days = workspace["weekly_config"].min_days_between_runs
+    second_run_date = run_date + timedelta(days=min_days)  # écart == seuil, pas < seuil
+
+    run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=run_date,
+    )
+    result = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=second_run_date,
+    )
+
+    assert result.skipped is False
+    assert result.report_path.exists()
+    state = load_weekly_state(workspace["weekly_config"].state_file)
+    assert state.last_run_date == second_run_date
+
+
+def test_force_bypasses_refusal_and_report_footer_mentions_forced(workspace):
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+    run_date = date(2024, 6, 1)
+
+    run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=run_date,
+    )
+    report_path = workspace["weekly_config"].reports_dir / "2024-06-01.md"
+    report_path.unlink()  # supprimé pour vérifier que --force le réécrit bien (même run_date)
+
+    result = run_weekly(  # même jour que la précédente -> refusée sans --force
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=FakeProvider(), run_date=run_date, force=True,
+    )
+
+    assert result.skipped is False
+    assert report_path.exists()  # --force a bien laissé la pipeline s'exécuter jusqu'au bout
+    assert "FORCÉE" in result.report_text
+    assert "--force" in result.report_text
+
+
+def test_no_state_file_executes_normally_without_error(workspace):
+    assert not workspace["weekly_config"].state_file.exists()
+    end_date = _end_date_for_oos_bars(_SPLIT_DATE, 10)
+    data_config = workspace["make_data_config"](end_date)
+    provider = FakeProvider()
+
+    result = run_weekly(
+        workspace["weekly_config"], data_config, workspace["backtest_config"], workspace["known_anomalies"],
+        provider=provider, run_date=date(2024, 6, 1),
+    )
+
+    assert result.skipped is False
+    assert result.exit_code == 0
+    assert provider.calls  # absence de fichier d'état != refus

@@ -26,6 +26,11 @@ make survey
 #    section "make weekly" ci-dessous.
 make weekly
 
+# 5bis. Comme make weekly, mais contourne le refus d'exécution trop
+#       rapprochée de la précédente (voir "Refus d'une exécution trop
+#       rapprochée" ci-dessous) — rattrapage manuel volontaire.
+make weekly-force
+
 # 6. Lancer la suite de tests.
 make check
 ```
@@ -81,7 +86,7 @@ tester des paramètres sans toucher au fichier par défaut.
 | `config/backtest.yaml` | Modèle de coûts (grille de courtage, TTF, glissement de base), capital initial, fréquence de rééquilibrage, `min_bars_per_period` (garde-fou NON TESTABLE, voir ci-dessous). |
 | `config/strategies/*.yaml` | Paramètres de chaque stratégie (voir tableau ci-dessus). |
 | `config/known_anomalies.yaml` | Ligne de base des anomalies de validation déjà examinées et acceptées (trous, valeurs aberrantes, splits suspects) — évite qu'elles ressortent comme "nouvelles" à chaque ingestion. Générer/mettre à jour avec `--init-known-anomalies` (voir README), puis éditer le champ `note` à la main. |
-| `config/weekly.yaml` | Univers, date de coupure (`split_date`, FIGÉE — voir ci-dessous), stratégie, répertoires de rapport/état de `make weekly`. |
+| `config/weekly.yaml` | Univers, date de coupure (`split_date`, FIGÉE — voir ci-dessous), stratégie, répertoires de rapport/état, `min_days_between_runs` (voir "Refus d'une exécution trop rapprochée" ci-dessous) de `make weekly`. |
 
 ## make weekly : rapport hebdomadaire daté
 
@@ -95,10 +100,12 @@ d'afficher un résultat qui disparaît à la fermeture du terminal.
   versionné (voir `.gitignore`) : c'est une sortie produite, pas une
   décision humaine — contrairement à `config/known_anomalies.yaml`.
 - **Comment lire le rapport** : ne lire que la section **"Changements"**,
-  en tête. Une semaine normale, elle dit juste "Rien de nouveau depuis
-  le AAAA-MM-JJ." et il n'y a rien d'autre à faire. Les sections
-  "Données", "Résultats" (le tableau complet, comme `make survey`) et le
-  pied de page ne sont que du matériel de référence, à consulter
+  en tête. Une semaine normale, elle affiche deux lignes de confirmation
+  explicites ("Aucune anomalie nouvelle depuis le AAAA-MM-JJ.", "Aucun
+  changement de verdict depuis le AAAA-MM-JJ.") et il n'y a rien d'autre
+  à faire. Les sections "Données", "En attente d'examen" (voir
+  ci-dessous), "Résultats" (le tableau complet, comme `make survey`) et
+  le pied de page ne sont que du matériel de référence, à consulter
   seulement si la section "Changements" pointe vers quelque chose de
   précis (un ticker, une anomalie).
 - **Premier lancement** : `data/last_verdicts.json` (`state_file`)
@@ -106,15 +113,57 @@ d'afficher un résultat qui disparaît à la fermeture du terminal.
   ("Première exécution") plutôt que de lister chaque ticker comme un
   faux "changement". L'état écrit à cette occasion sert de référence à
   la prochaine exécution.
+- **Anomalie nouvelle vs anomalie en attente** : une anomalie hors ligne
+  de base (`config/known_anomalies.yaml`) mais pas encore justifiée
+  n'est signalée dans "Changements" (et ne déclenche le code 1) que la
+  **première fois** qu'elle apparaît. Aux exécutions suivantes, tant
+  qu'elle n'est ni expliquée ni disparue, elle bascule dans la section
+  **"En attente d'examen"** — visible avec sa date de première apparition
+  et le nombre de jours d'attente, mais sans redéclencher le code 1 à
+  chaque fois. Sinon une anomalie non encore examinée réclamerait
+  l'attention indéfiniment, jusqu'à ce que le rapport cesse d'être lu —
+  exactement ce que la ligne de base sert déjà à éviter côté ingestion
+  (voir "Codes de sortie de l'ingestion" ci-dessus). L'ajouter à
+  `config/known_anomalies.yaml` (avec une vraie justification) la fait
+  disparaître des deux sections au run suivant.
 
 Codes de sortie (même logique que `make update`/`src.data.ingest`, voir
 ci-dessus) :
 
 | Code | Signification |
 |------|---------------|
-| `0`  | Rapport écrit, **aucun changement** à lire. |
-| `1`  | Rapport écrit, **au moins un changement** à lire (anomalie nouvelle et/ou changement de verdict/apparition/disparition d'un ticker) — rien n'est cassé, `make weekly` invite juste à ouvrir le rapport. |
+| `0`  | Rapport écrit, **aucun changement** à lire (des anomalies peuvent rester en attente d'examen — voir plus bas — sans faire échouer ce code). **Ou** exécution refusée (voir ci-dessous) — pas d'échec non plus. |
+| `1`  | Rapport écrit, **au moins un changement** à lire (anomalie vue pour la **première fois** et/ou changement de verdict/apparition/disparition d'un ticker) — rien n'est cassé, `make weekly` invite juste à ouvrir le rapport. |
 | `2`  | **Échec technique** : exception, ligne de base illisible, `data/last_verdicts.json` corrompu, ou rapport/état impossible à écrire (un rapport non écrit est un échec, jamais un silence). |
+
+### Refus d'une exécution trop rapprochée
+
+`make weekly` est destinée à être planifiée (ex. planificateur de tâches
+Windows) avec rattrapage : si le PC était éteint à l'heure prévue, la
+tâche part au démarrage suivant. Plusieurs démarrages le même jour
+déclenchent alors plusieurs exécutions, chacune retéléchargeant,
+recalculant et réécrivant par-dessus le rapport du jour.
+
+`src.weekly` refuse donc de tourner si `data/last_verdicts.json`
+(`state_file`) indique une exécution précédente vieille de **moins de
+`min_days_between_runs` jours** (`config/weekly.yaml`, défaut `5`) :
+aucun téléchargement, aucun calcul, aucun rapport ni état écrit — juste
+un message (date de la dernière exécution, jours écoulés, date de la
+prochaine exécution acceptée) et le code de sortie `0`. Le contrôle
+s'exécute **avant** l'ingestion : un refus ne provoque donc aucun accès
+réseau. Fichier d'état absent (première exécution) : pas de refus
+possible, ce n'est pas une erreur.
+
+Seuil à `5` plutôt que `7` (l'espacement hebdomadaire visé) : si une
+exécution part en rattrapage au milieu de la semaine, l'échéance
+hebdomadaire suivante peut tomber seulement 5 jours plus tard ; un seuil
+à `7` la refuserait aussi, et le rythme dériverait d'une semaine à
+l'autre au lieu de se recaler.
+
+Pour un rattrapage manuel volontaire malgré ce refus : `make weekly-force`
+(`src.weekly --force`). Le rapport produit l'indique dans son pied de
+page ("Exécution FORCÉE"), pour qu'on puisse le distinguer plus tard des
+rapports issus d'une exécution normale.
 
 ## Verdict NON TESTABLE (période insuffisante)
 

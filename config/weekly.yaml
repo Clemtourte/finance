@@ -35,3 +35,19 @@ reports_dir: reports
 # Absent au premier lancement : ce n'est pas une erreur, juste rien à
 # comparer — le rapport le dit explicitement.
 state_file: data/last_verdicts.json
+
+# Nombre minimal de jours devant séparer deux exécutions : en dessous,
+# `src.weekly` refuse de tourner (aucune ingestion, aucun rapport, code
+# de sortie 0 — voir SETUP.md, section "make weekly"). Sert de garde-fou
+# contre le rattrapage du planificateur de tâches Windows : si le PC est
+# éteint à l'heure prévue, la tâche part au prochain démarrage, et
+# plusieurs démarrages le même jour déclencheraient sinon plusieurs
+# exécutions qui réécrivent successivement le rapport du jour.
+#
+# 5 plutôt que 7 (l'espacement hebdomadaire visé) : si une exécution part
+# en rattrapage au milieu de la semaine, l'échéance hebdomadaire suivante
+# peut tomber seulement 5 jours plus tard. Un seuil à 7 la refuserait
+# aussi, et le rythme dériverait d'une semaine à l'autre au lieu de se
+# recaler. Absente du fichier -> 5 (défaut, ne casse pas un
+# config/weekly.yaml existant écrit avant cette clé).
+min_days_between_runs: 5

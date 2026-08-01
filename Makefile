@@ -1,4 +1,4 @@
-.PHONY: install test check ingest update backtest test-one batch survey weekly clean
+.PHONY: install test check ingest update backtest test-one batch survey weekly weekly-force clean
 
 # Défauts partagés par les cibles d'usage courant (survey, test-one) :
 # aucun argument n'est obligatoire pour un run standard.
@@ -66,6 +66,20 @@ survey:
 # ici dans le rapport plutôt que dans la sortie de la commande.
 weekly:
 	@uv run python -m src.weekly; \
+	code=$$?; \
+	if [ $$code -eq 2 ]; then \
+		exit 2; \
+	elif [ $$code -eq 1 ]; then \
+		echo ""; \
+		echo "make : changements à lire (code 1) - voir la section Changements du rapport ci-dessus."; \
+	fi
+
+# Rattrapage manuel volontaire : contourne le refus d'exécution trop
+# rapprochée de la précédente (min_days_between_runs, config/weekly.yaml
+# — voir SETUP.md, section "make weekly"). Même traitement des codes de
+# sortie que la cible weekly ci-dessus, inchangée par ailleurs.
+weekly-force:
+	@uv run python -m src.weekly --force; \
 	code=$$?; \
 	if [ $$code -eq 2 ]; then \
 		exit 2; \

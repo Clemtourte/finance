@@ -268,15 +268,66 @@ Pour savoir ce qui a changé, chaque exécution compare son résultat à
 - **ticker disparu** : présent dans l'état précédent, absent cette
   fois-ci (ex. retiré de l'univers) — signalé explicitement, jamais
   simplement omis du rapport ;
-- **anomalie nouvelle** : au sens habituel de `src.data.baseline`
-  (absente de `config/known_anomalies.yaml`), indépendamment de
-  l'exécution précédente.
+- **anomalie vue pour la première fois** : absente à la fois de
+  `config/known_anomalies.yaml` ET de l'état de la précédente exécution
+  — voir la sous-section suivante, une anomalie hors ligne de base n'est
+  pas automatiquement "nouvelle" indéfiniment.
 
 Fichier absent (`data/last_verdicts.json` n'existe pas encore) =
 première exécution : ce n'est pas une erreur, le rapport le dit
 explicitement plutôt que de lister chaque ticker comme un faux
 "changement" (il n'y a encore rien à comparer). L'état écrit à cette
 occasion sert de référence à la prochaine exécution.
+
+Quand il n'y a rien à signaler, le rapport se prononce explicitement sur
+les deux sujets plutôt que de rester silencieux (un sujet dont on ne
+parle pas se lit comme "pas vérifié", pas comme "rien à signaler") :
+
+```
+Aucune anomalie nouvelle depuis le 2026-07-24.
+Aucun changement de verdict depuis le 2026-07-24.
+```
+
+### Anomalie nouvelle vs anomalie en attente d'examen
+
+Une anomalie absente de `config/known_anomalies.yaml` n'est pas
+forcément une anomalie qui vient d'apparaître : `config/
+known_anomalies.yaml` n'est mis à jour qu'à la main (`--init-known-
+anomalies` puis édition du champ `note`), donc une anomalie déjà
+détectée reste hors ligne de base — et continuerait à ressortir comme
+"nouvelle" à *chaque* exécution — tant que personne n'a pris le temps de
+l'examiner et de la classer. C'est exactement le défaut que la ligne de
+base sert déjà à éviter côté ingestion (voir "Codes de sortie de
+l'ingestion" dans SETUP.md) ; sans distinction supplémentaire, le rapport
+hebdomadaire y retombait telle quelle dès qu'une anomalie mettait plus
+d'une semaine à être justifiée.
+
+`data/last_verdicts.json` mémorise donc aussi, par anomalie identifiée
+par le triplet `(ticker, kind, date)` (même convention d'identité que
+`src.data.baseline.AnomalyKey`), sa date de première apparition :
+
+- **absente de la ligne de base ET absente de l'état précédent** :
+  vue pour la première fois -> section **"Changements"**, code de sortie
+  `1`.
+- **absente de la ligne de base MAIS déjà dans l'état précédent** :
+  toujours pas examinée, mais ce n'est plus une nouveauté -> section
+  **"En attente d'examen"** (après "Données"), avec la date de première
+  apparition et le nombre de jours d'attente ; code de sortie **pas**
+  affecté (reste `0` si c'est la seule chose en attente).
+- **présente dans la ligne de base** : filtrée en amont par
+  `src.data.baseline.filter_known`, comme pour l'ingestion — rien du
+  tout dans le rapport.
+
+Une anomalie ajoutée à `config/known_anomalies.yaml` entre deux
+exécutions disparaît des deux sections au run suivant : `filter_known`
+l'exclut avant même la comparaison, donc rien ne la fait réapparaître
+comme "en attente" par erreur.
+
+Le format de `state_file` reste rétrocompatible : la clé `"anomalies"`
+est optionnelle — un fichier écrit avant cette fonctionnalité (qui ne la
+contient pas) se charge sans erreur, et chaque anomalie hors ligne de
+base y est alors simplement considérée comme vue pour la première fois à
+l'exécution courante (jamais une erreur de chargement).
 
 ### Pourquoi `split_date` est figée dans `config/weekly.yaml`
 
@@ -292,6 +343,39 @@ significative — deviendrait alors illisible : impossible de savoir si
 c'est le marché ou la fenêtre de mesure qui vient de changer. `split_date`
 n'est donc avancée qu'à la main, consciemment, quand la fenêtre doit être
 recalée.
+
+### Refus d'une exécution trop rapprochée de la précédente
+
+`make weekly` est prévue pour être planifiée (ex. planificateur de tâches
+Windows) avec l'option de rattrapage : si le PC était éteint à l'heure
+prévue, la tâche part au prochain démarrage. Plusieurs démarrages le même
+jour peuvent alors déclencher plusieurs exécutions, qui retéléchargent,
+recalculent et réécrivent chacune par-dessus le rapport du jour — le
+rapport perd alors son sens de "point de comparaison hebdomadaire", et
+plusieurs accès réseau inutiles sont faits pour rien.
+
+`src.weekly` compare donc, AVANT toute ingestion, la date de la dernière
+exécution enregistrée dans `data/last_verdicts.json` (`state_file`) à
+aujourd'hui. Si l'écart est strictement inférieur à
+`min_days_between_runs` (`config/weekly.yaml`, défaut `5`), l'exécution
+est refusée : rien n'est téléchargé, rien n'est recalculé, aucun rapport
+ni état n'est écrit, et le code de sortie reste `0` (un refus n'est pas
+un échec). Le message affiché donne la date de la dernière exécution, le
+nombre de jours écoulés, et la date à partir de laquelle une nouvelle
+exécution sera acceptée. Absence de `state_file` (première exécution) ou
+écart exactement égal au seuil : exécution normale dans les deux cas.
+
+`5` plutôt que `7` (l'espacement hebdomadaire visé) : une exécution
+rattrapée en milieu de semaine peut faire tomber l'échéance hebdomadaire
+suivante seulement 5 jours plus tard. Un seuil à `7` la refuserait aussi,
+et le rythme des exécutions dériverait alors d'une semaine à l'autre au
+lieu de se recaler naturellement sur le jour habituel.
+
+`--force` (`make weekly-force`) contourne entièrement ce contrôle, pour
+un rattrapage manuel volontaire (ex. après une longue coupure) : le
+rapport produit l'indique explicitement dans son pied de page
+("Exécution FORCÉE"), pour qu'on puisse le distinguer plus tard d'un
+rapport issu d'une exécution normale.
 
 ## Installation
 
@@ -558,7 +642,7 @@ config/
   universe_cac40.yaml          # univers de tickers (CAC 40) + ttf/spread_pct
   universe_etf_pea.yaml        # univers d'ETF PEA (CW8/EWLD, PSP5, ETZ)
   backtest.yaml                # capital, coûts par paliers, TTF, glissement, rééquilibrage
-  weekly.yaml                  # univers/split_date (FIGÉE)/stratégie/chemins de `make weekly`
+  weekly.yaml                  # univers/split_date (FIGÉE)/stratégie/chemins/min_days_between_runs de `make weekly`
   strategies/
     sma_crossover.yaml         # référence
     momentum_12_1.yaml
