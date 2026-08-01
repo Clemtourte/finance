@@ -2,7 +2,10 @@
 
 Pense-bête pour quelqu'un qui a oublié les commandes. Pour le *pourquoi*
 des choix de conception (modèle de coûts, in-sample/out-of-sample,
-convention spread_pct...), voir le `README.md`.
+convention spread_pct...), voir le `README.md`. Pour la planification
+automatique de `make weekly` (tâche planifiée Windows, script PowerShell,
+alerte Uptime Kuma), voir `docs/AUTOMATISATION.md` — ce document-ci ne
+couvre que le lancement manuel.
 
 ## Les commandes du quotidien
 
@@ -139,10 +142,11 @@ ci-dessus) :
 ### Refus d'une exécution trop rapprochée
 
 `make weekly` est destinée à être planifiée (ex. planificateur de tâches
-Windows) avec rattrapage : si le PC était éteint à l'heure prévue, la
-tâche part au démarrage suivant. Plusieurs démarrages le même jour
-déclenchent alors plusieurs exécutions, chacune retéléchargeant,
-recalculant et réécrivant par-dessus le rapport du jour.
+Windows — voir `docs/AUTOMATISATION.md` pour la mise en place complète)
+avec rattrapage : si le PC était éteint à l'heure prévue, la tâche part
+au démarrage suivant. Plusieurs démarrages le même jour déclenchent alors
+plusieurs exécutions, chacune retéléchargeant, recalculant et réécrivant
+par-dessus le rapport du jour.
 
 `src.weekly` refuse donc de tourner si `data/last_verdicts.json`
 (`state_file`) indique une exécution précédente vieille de **moins de

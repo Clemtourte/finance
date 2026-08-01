@@ -28,6 +28,58 @@ Couches implémentées à ce stade :
 Pas encore implémenté : optimisation/balayage de paramètres, walk-forward,
 multi-actifs, stratégies short/à levier.
 
+## Ce que ce projet fait — et ce qu'il ne fait pas
+
+**Fait** : télécharge et valide des données OHLCV quotidiennes, teste si
+une règle mécanique bat un simple achat-conservation (buy & hold) une
+fois les coûts de transaction comptés, sur les mêmes données et dans les
+mêmes conditions ; découpe systématiquement la mesure entre apprentissage
+(in-sample) et vérification (out-of-sample) ; produit chaque semaine un
+rapport daté qui dit ce qui a changé depuis la semaine précédente (voir
+`make weekly` plus bas).
+
+**Ne fait pas** :
+
+- **Ne suit AUCUN portefeuille réel.** Aucune position détenue, aucun
+  solde de compte, aucun historique d'ordres passés n'est représenté
+  nulle part dans ce dépôt — `config/universe_perso.yaml` liste des
+  tickers à évaluer, pas un état de compte (voir `docs/DECISIONS.md`).
+- **Ne passe aucun ordre.** C'est un outil de mesure, pas d'exécution :
+  rien ici ne parle à un courtier, aucune API de trading n'est branchée.
+- **Ne décide rien.** `make weekly` produit un verdict par ticker
+  (`SURVIT`/`REJETÉ`/`NON TESTABLE`) dans un rapport ; il ne déclenche
+  aucune action. Agir sur un verdict — ou pas — reste un choix humain,
+  fait ailleurs, après lecture du rapport.
+
+## La chaîne complète
+
+```
+données (src/data/, make ingest)
+  -> contrôle qualité (src/data/validation.py, ligne de base config/known_anomalies.yaml)
+  -> stratégie (src/strategies/, position décidée à J, exécutée à l'ouverture de J+1)
+  -> comparaison au buy & hold, mêmes coûts, mêmes dates (src/engine/, src/metrics/)
+  -> rapport hebdomadaire daté (src/reporting/weekly_report.py, make weekly)
+```
+
+C'est l'enchaînement que `make weekly` exécute réellement chaque semaine
+(voir « Rapport hebdomadaire » plus bas) ; chaque maillon est détaillé
+dans sa propre section ci-dessous.
+
+## Garde-fous (vue d'ensemble)
+
+Chacun est expliqué en détail dans sa section propre — ce tableau sert de
+repère pour quelqu'un qui n'a pas le temps de tout relire.
+
+| Garde-fou | Empêche |
+|---|---|
+| Exécution décalée à J+1 (« Convention anti-look-ahead bias », ci-dessous) | Qu'un signal calculé avec la clôture du jour J s'exécute au prix de ce même jour J — impossible à reproduire en réalité. |
+| Coûts de transaction obligatoires (« Modèle de coûts ») | De mesurer une performance qui n'existe que parce qu'on a oublié le courtage, la taxe ou le spread. |
+| Découpage apprentissage / vérification (« In-sample / out-of-sample ») | De se convaincre qu'une stratégie marche en la jugeant sur les données mêmes qui ont servi à la choisir. |
+| Verdict `NON TESTABLE` (« Garde-fou : période trop courte pour juger ») | De trancher SURVIT/REJETÉ sur une poignée de séances, où un seul mouvement de marché déciderait de tout. |
+| `SURVIT` exige un gain réel (« Backtest sur tout un univers ») | De confondre « bat un buy & hold qui s'effondre » avec une vraie performance. |
+| Ligne de base des anomalies (`config/known_anomalies.yaml`) | Qu'une anomalie déjà examinée noie, à chaque ingestion, la vraie nouveauté qu'il faut regarder. |
+| Refus d'exécution rapprochée (`min_days_between_runs`, « Rapport hebdomadaire ») | Que le rattrapage du planificateur (PC éteint à l'heure prévue) déclenche plusieurs exécutions le même jour, qui s'écrasent l'une l'autre. |
+
 ## Convention anti-look-ahead bias
 
 Cette règle s'applique à tout le pipeline et est appliquée en code, pas
@@ -641,6 +693,9 @@ config/
   data.yaml                    # période, chemins, seuils de validation
   universe_cac40.yaml          # univers de tickers (CAC 40) + ttf/spread_pct
   universe_etf_pea.yaml        # univers d'ETF PEA (CW8/EWLD, PSP5, ETZ)
+  universe_perso.yaml          # lignes réellement détenues (voir docs/DECISIONS.md #1, #6)
+  universe_etude.yaml          # titres analysés mais NON détenus (voir docs/DECISIONS.md #6)
+  known_anomalies.yaml         # ligne de base des anomalies déjà examinées et acceptées
   backtest.yaml                # capital, coûts par paliers, TTF, glissement, rééquilibrage
   weekly.yaml                  # univers/split_date (FIGÉE)/stratégie/chemins/min_days_between_runs de `make weekly`
   strategies/
@@ -648,6 +703,9 @@ config/
     momentum_12_1.yaml
     rebalance_bandes.yaml
     dca.yaml
+docs/
+  AUTOMATISATION.md            # planification Windows de make weekly (script, tâche, alerte Uptime Kuma)
+  DECISIONS.md                 # choix structurants et leur justification
 src/
   data/
     schema.py                  # colonnes/dtypes OHLCV canoniques + convention anti-look-ahead
@@ -709,3 +767,61 @@ Implémenter `DataProvider.get_ohlcv(ticker, start, end) -> pd.DataFrame`
 référence), puis passer une instance de ce provider à `sync_ticker` /
 `run_ingestion` à la place de `YFinanceProvider`. Rien d'autre dans le
 pipeline (cache, validation, DuckDB) n'a besoin de changer.
+
+## Limites connues
+
+Honnêteté délibérée : rien ci-dessous n'est caché ailleurs dans cette
+documentation ou dans le code — c'est juste consolidé ici pour ne pas
+avoir à le redécouvrir en relisant tout le projet dans six mois.
+
+- **Moteur mono-actif : aucune notion de corrélation entre titres.**
+  Chaque ticker de l'univers est backtesté indépendamment des autres
+  (`momentum_12_1.py` le documente explicitement : « comparaison à sa
+  propre trajectoire passée, pas de classement contre un univers »). Un
+  `make survey` sur plusieurs titres ne dit donc rien de ce qui se
+  passerait si tous étaient détenus ensemble au même moment (risque de
+  concentration sectorielle, corrélation qui monte justement en période
+  de stress...).
+- **Positions tout ou rien, pas de pondération.** Le moteur
+  (`src/engine/backtest.py`) ne connaît que 0% ou 100% investi sur un
+  ticker donné — jamais une allocation fractionnaire entre plusieurs
+  lignes. `rebalance_bandes.py` le contourne en interprétant sa « bande »
+  comme une dérive de prix plutôt qu'un poids de portefeuille, faute de
+  mieux (voir « Stratégies disponibles » ci-dessus).
+- **TTF appliquée à 0,4% depuis 2010, alors qu'elle n'existait pas avant
+  août 2012 et que son taux a évolué depuis.** `config/data.yaml` fixe
+  `start_date: 2010-01-01` et `config/backtest.yaml` applique
+  `ttf_pct: 0.004` à chaque achat éligible sur toute la période — y
+  compris 2010-2012 (la taxe n'existait pas encore) et les années
+  suivantes (taux différent de 0,4% à l'époque). L'erreur va dans le sens
+  prudent : elle ne fait que pénaliser la stratégie testée, jamais
+  l'inverse. Mais elle fausse quand même la comparaison sur les toutes
+  premières années de la période — à garder en tête sur un `--split-date`
+  ancien.
+- **`spread_pct` des petites valeurs : des estimations non mesurées, qui
+  décident pourtant du résultat.** `config/universe_perso.yaml` marque
+  explicitement plusieurs valeurs `PLACEHOLDER GROSSIER — à mesurer` (ex.
+  AL2SI.PA, ALKAL.PA). Sur ces titres à faible liquidité, c'est ce chiffre
+  jamais confronté à un vrai carnet d'ordres qui pèse le plus dans le
+  coût total — et donc dans le verdict.
+- **Un résultat proche de zéro peut basculer de verdict sur quelques
+  séances** — cas observé sur ALKAL.PA. Quand l'écart stratégie/buy &
+  hold sur l'out-of-sample est de l'ordre de grandeur du bruit (quelques
+  séances de plus ou de moins dans la fenêtre mesurée, ou une légère
+  variation de `spread_pct`), le verdict SURVIT/REJETÉ peut changer sans
+  qu'il se soit rien passé de significatif sur le marché. Un verdict dans
+  ce cas est instable et ne devrait pas être pris au sérieux tel quel —
+  il mérite de regarder l'écart réel de CAGR dans le tableau détaillé,
+  pas seulement le mot du verdict.
+- **La grille de courtage doit être revérifiée contre la grille réelle.**
+  `config/backtest.yaml` documente la grille BoursoBank « Découverte »
+  comme point de départ, explicitement marquée « à vérifier/ajuster » —
+  elle n'a jamais été confrontée à la grille tarifaire réellement en
+  vigueur au moment de chaque backtest.
+- **Aucun test ne couvre l'accès réseau.** `make test` remplace
+  systématiquement `YFinanceProvider` par un double en mémoire
+  (`FakeProvider`, voir « Tests » ci-dessus) : la suite valide donc la
+  logique du pipeline (calculs, garde-fous, comparaisons), jamais le fait
+  que yfinance répond, renvoie un format stable dans le temps, ou reste
+  disponible. Cette partie-là ne peut être vérifiée qu'en exécutant
+  réellement `make ingest` / `make weekly`.
